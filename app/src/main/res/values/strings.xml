@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name" translatable="false">CapyCoin</string>
+    <string name="shortcut_quick_expense_short">Registrar Gasto</string>
+    <string name="shortcut_quick_expense_long">Registrar gasto rápido</string>
+</resources>

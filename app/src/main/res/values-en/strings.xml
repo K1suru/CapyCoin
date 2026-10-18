@@ -1,0 +1,4 @@
+<resources>
+    <string name="shortcut_quick_expense_short">Add expense</string>
+    <string name="shortcut_quick_expense_long">Add a quick expense</string>
+</resources>
