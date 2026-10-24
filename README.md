@@ -1,56 +1,6 @@
 # CapyCoin 🍊
 
-**[English](#english) · [Español](#español)**
-
----
-
-## English
-
-A capybara-themed personal finance app for Android: income, fixed expenses, savings and credit cards with installments, month by month.
-
-### Features
-
-- **Monthly summary** with the capybara in the bath: the water rises with the % of your income you've used.
-- **Income**: one-time, recurring (with an optional end date) or in installments; refunds linked to expenses.
-- **Expenses** grouped by day, in COP or USD (official exchange rate from Banco de la República), with paid and ignored marks.
-- **Wallet-style credit cards**: installments with interest (French amortization), extra payments, early payoff, card fee with spending waiver and credit limit used.
-- **Savings**, payment reminders, Capy tips and a monthly CSV report.
-- **File backups**, privacy mode and fingerprint lock.
-- **Express mode** for the cover screen of Galaxy Z Flip phones.
-- **English and Spanish**: choose the language in Settings.
-
-### Tech
-
-Kotlin · Jetpack Compose (Material 3) · Room · Coroutines/Flow · minSdk 24 (with `java.time` desugaring).
-
-### Build
-
-1. Open the folder in Android Studio (or run `./gradlew assembleDebug`).
-2. Signing uses `app/keystore/capycoin.jks`, which is **not** in the repository. Without it, debug builds use Android's standard debug key. To sign with your own key, create a keystore at that path and add to `local.properties`:
-
-   ```properties
-   capycoin.storePassword=...
-   capycoin.keyAlias=...
-   capycoin.keyPassword=...
-   ```
-
-### Tests
-
-```bash
-./gradlew testDebugUnitTest
-```
-
-### Credits
-
-[Nunito](https://fonts.google.com/specimen/Nunito) font under the SIL Open Font License (see `app/src/main/assets/licenses/Nunito-OFL.txt`).
-
-### Author
-
-**Juan Garcia** — [garciagjs@javeriana.edu.co](mailto:garciagjs@javeriana.edu.co)
-
-### License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+**[Español](#español) · [English](#english)**
 
 ---
 
@@ -101,3 +51,53 @@ Fuente [Nunito](https://fonts.google.com/specimen/Nunito) bajo licencia SIL Open
 ### Licencia
 
 Este proyecto está bajo la licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+
+---
+
+## English
+
+A capybara-themed personal finance app for Android: income, fixed expenses, savings and credit cards with installments, month by month.
+
+### Features
+
+- **Monthly summary** with the capybara in the bath: the water rises with the % of your income you've used.
+- **Income**: one-time, recurring (with an optional end date) or in installments; refunds linked to expenses.
+- **Expenses** grouped by day, in COP or USD (official exchange rate from Banco de la República), with paid and ignored marks.
+- **Wallet-style credit cards**: installments with interest (French amortization), extra payments, early payoff, card fee with spending waiver and credit limit used.
+- **Savings**, payment reminders, Capy tips and a monthly CSV report.
+- **File backups**, privacy mode and fingerprint lock.
+- **Express mode** for the cover screen of Galaxy Z Flip phones.
+- **Spanish and English**: choose the language in Settings.
+
+### Tech
+
+Kotlin · Jetpack Compose (Material 3) · Room · Coroutines/Flow · minSdk 24 (with `java.time` desugaring).
+
+### Build
+
+1. Open the folder in Android Studio (or run `./gradlew assembleDebug`).
+2. Signing uses `app/keystore/capycoin.jks`, which is **not** in the repository. Without it, debug builds use Android's standard debug key. To sign with your own key, create a keystore at that path and add to `local.properties`:
+
+   ```properties
+   capycoin.storePassword=...
+   capycoin.keyAlias=...
+   capycoin.keyPassword=...
+   ```
+
+### Tests
+
+```bash
+./gradlew testDebugUnitTest
+```
+
+### Credits
+
+[Nunito](https://fonts.google.com/specimen/Nunito) font under the SIL Open Font License (see `app/src/main/assets/licenses/Nunito-OFL.txt`).
+
+### Author
+
+**Juan Garcia** — [garciagjs@javeriana.edu.co](mailto:garciagjs@javeriana.edu.co)
+
+### License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
