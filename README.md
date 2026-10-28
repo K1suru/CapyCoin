@@ -13,6 +13,7 @@ App Android de finanzas personales con temática de capibara: ingresos, gastos f
 - **Resumen del mes** con el capibara en la tina: el agua sube según el % de ingresos usado.
 - **Ingresos** únicos, recurrentes (con fecha límite opcional) y en cuotas; reembolsos vinculados a gastos.
 - **Gastos** agrupados por día, en COP o USD (TRM del Banco de la República), con marcas de pagado e ignorado.
+- **Gastos fijos en cuotas** (por ejemplo, una deuda con alguien): cuota fija por N meses ("Cuota 3 de 36"), abonos que acortan la deuda y saldo pendiente.
 - **Tarjetas de crédito** tipo billetera: cuotas con interés (sistema francés), abonos, liquidación anticipada, cuota de manejo con exoneración y cupo usado.
 - **Ahorros**, recordatorios de pago, Capy-consejos y reporte CSV mensual.
 - **Copias de seguridad** en archivo, modo privado y bloqueo con huella.
@@ -63,6 +64,7 @@ A capybara-themed personal finance app for Android: income, fixed expenses, savi
 - **Monthly summary** with the capybara in the bath: the water rises with the % of your income you've used.
 - **Income**: one-time, recurring (with an optional end date) or in installments; refunds linked to expenses.
 - **Expenses** grouped by day, in COP or USD (official exchange rate from Banco de la República), with paid and ignored marks.
+- **Fixed expenses in installments** (e.g. money you owe someone): a fixed payment for N months ("Installment 3 of 36"), extra payments that shorten the debt, and the remaining balance.
 - **Wallet-style credit cards**: installments with interest (French amortization), extra payments, early payoff, card fee with spending waiver and credit limit used.
 - **Savings**, payment reminders, Capy tips and a monthly CSV report.
 - **File backups**, privacy mode and fingerprint lock.

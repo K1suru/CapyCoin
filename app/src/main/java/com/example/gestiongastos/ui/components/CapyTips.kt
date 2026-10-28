@@ -88,7 +88,7 @@ fun buildCapyTips(
     counted.maxByOrNull { inCop(it) }?.let { biggest ->
         tips += CapyTip(tr("Tu gasto fijo más grande del mes es «${biggest.concept}» con ${money(inCop(biggest))}.", "Your biggest fixed expense this month is “${biggest.concept}” at ${money(inCop(biggest))}."), CapyFace.SHINY)
     }
-    val dayToDay = counted.filter { !it.isRecurring }
+    val dayToDay = counted.filter { !it.isRecurring && it.installments == 0 }
     if (dayToDay.isNotEmpty()) {
         tips += CapyTip(tr("Llevas ${dayToDay.size} gasto(s) del día a día, en total ${money(dayToDay.sumOf { inCop(it) })}. ¡Ojo con los antojitos! 🍡", "You have ${dayToDay.size} everyday expense(s), ${money(dayToDay.sumOf { inCop(it) })} in total. Watch those treats! 🍡"), CapyFace.SHINY)
     }

@@ -1,5 +1,8 @@
 package com.example.gestiongastos.data.repository
 
+import com.example.gestiongastos.data.model.calculateExpenseInstallment
+import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
+import com.example.gestiongastos.data.local.ExpensePaymentEntity
 import com.example.gestiongastos.data.local.AppDatabase
 import com.example.gestiongastos.data.local.CardPurchaseEntity
 import com.example.gestiongastos.data.local.CardPurchasePaymentEntity
@@ -62,6 +65,7 @@ class FinanceRepository(private val db: AppDatabase) {
     val paidExpenses: Flow<List<PaidExpenseEntity>> = db.paidExpenseDao().getAllPaidExpenses()
     val settledPurchases: Flow<List<SettledPurchaseEntity>> = db.settledPurchaseDao().getAllSettledPurchases()
     val receivedIncomes: Flow<List<ReceivedIncomeEntity>> = db.receivedIncomeDao().getAllReceivedIncomes()
+    val expensePayments: Flow<List<ExpensePaymentEntity>> = db.expensePaymentDao().getAllExpensePayments()
 
     suspend fun toggleReceivedIncome(incomeId: Long, targetYearMonth: YearMonth) {
         val ymText = targetYearMonth.toString()
@@ -147,6 +151,7 @@ class FinanceRepository(private val db: AppDatabase) {
     suspend fun updateExpense(expense: ExpenseEntity) = db.expenseDao().updateExpense(expense)
     suspend fun deleteExpense(expense: ExpenseEntity) = db.withTransaction {
         deleteItemMarks(ItemKeys.direct(expense.id))
+        db.expensePaymentDao().deletePaymentsForExpense(expense.id)
         db.expenseDao().deleteExpense(expense)
     }
 
@@ -212,11 +217,35 @@ class FinanceRepository(private val db: AppDatabase) {
         }
     }
 
-    fun getExpensesForMonth(targetYearMonth: YearMonth): Flow<List<ExpenseEntity>> {
-        return expenses.map { expensesList ->
-            expensesList.filter { expense ->
-                isInMonth(targetYearMonth, yearMonthOf(expense.date), expense.isRecurring, expense.endDateMillis)
+    suspend fun addExpensePayment(payment: ExpensePaymentEntity) = db.expensePaymentDao().insertPayment(payment)
+
+    /**
+     * Gastos del mes. Los gastos en cuotas aparecen mientras dure la deuda y con el monto que toca
+     * pagar ese mes (la última cuota puede ser menor por los abonos); su detalle va en el mapa.
+     * Ojo: en esos gastos `amount` es el cobro del mes; el valor fijo de la cuota está en el mapa.
+     */
+    fun getExpensesForMonth(targetYearMonth: YearMonth): Flow<Pair<List<ExpenseEntity>, Map<Long, ExpenseInstallmentInfo>>> {
+        return combine(expenses, expensePayments) { expensesList, payments ->
+            val paymentsByExpense = payments.groupBy({ it.expenseId }) { p ->
+                PurchasePayment(try { YearMonth.parse(p.yearMonthText) } catch (e: Exception) { null }, p.amount)
             }
+            val infos = mutableMapOf<Long, ExpenseInstallmentInfo>()
+            val list = expensesList.mapNotNull { expense ->
+                if (expense.installments > 0) {
+                    val info = calculateExpenseInstallment(
+                        installmentAmount = expense.amount,
+                        installments = expense.installments,
+                        startYearMonth = yearMonthOf(expense.date),
+                        targetYearMonth = targetYearMonth,
+                        payments = paymentsByExpense[expense.id].orEmpty()
+                    ) ?: return@mapNotNull null
+                    infos[expense.id] = info
+                    expense.copy(amount = info.monthCharge)
+                } else if (isInMonth(targetYearMonth, yearMonthOf(expense.date), expense.isRecurring, expense.endDateMillis)) {
+                    expense
+                } else null
+            }
+            list to infos
         }
     }
 

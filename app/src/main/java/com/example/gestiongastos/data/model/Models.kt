@@ -322,3 +322,65 @@ fun calculatePurchaseInstallmentDetail(
         remainingBalanceAmount = remainingBalance
     )
 }
+
+/**
+ * Estado de un gasto fijo en cuotas en un mes (p. ej. una deuda con una persona).
+ * No hay intereses: el saldo es cuota × cuotas y los abonos lo bajan sin cambiar el valor de la cuota,
+ * así que la deuda termina antes (y la última cuota puede ser más pequeña).
+ */
+data class ExpenseInstallmentInfo(
+    val installmentAmount: Double,   // valor fijo de la cuota
+    val currentInstallment: Int,     // cuota de este mes (1..totalInstallments)
+    val totalInstallments: Int,      // total de cuotas contando los abonos
+    val monthCharge: Double,         // lo que se paga este mes (0 si un abono ya dejó todo pagado)
+    val remainingBalance: Double,    // saldo pendiente al empezar el mes (incluye la cuota de este mes)
+    val paidExtraTotal: Double,      // abonos hechos hasta este mes
+    val isPaidOff: Boolean           // un abono de este mes terminó la deuda
+)
+
+/**
+ * Calcula la cuota de [targetYearMonth]. Devuelve null si ese mes el gasto no aplica
+ * (antes de empezar o cuando la deuda ya terminó en un mes anterior).
+ * Un abono cuenta desde el mes en que se hizo y no cambia los meses anteriores.
+ */
+fun calculateExpenseInstallment(
+    installmentAmount: Double,
+    installments: Int,
+    startYearMonth: YearMonth,
+    targetYearMonth: YearMonth,
+    payments: List<PurchasePayment> = emptyList()
+): ExpenseInstallmentInfo? {
+    if (installments <= 0 || installmentAmount <= 0.0) return null
+    val current = monthsBetween(startYearMonth, targetYearMonth) + 1
+    if (current < 1) return null
+
+    val paymentsUpToTarget = payments.filter { it.yearMonth == null || !it.yearMonth.isAfter(targetYearMonth) }
+    val paymentMonth: (PurchasePayment) -> Int = { p ->
+        if (p.yearMonth == null) 1 else (monthsBetween(startYearMonth, p.yearMonth) + 1).coerceAtLeast(1)
+    }
+
+    var balance = installmentAmount * installments
+    for (i in 1..current) {
+        balance -= paymentsUpToTarget.filter { paymentMonth(it) == i }.sumOf { it.amount }
+        if (balance <= 0.000001) {
+            balance = 0.0
+            // Terminó este mes con un abono: se muestra este mes (pagado) y ya no después
+            return if (i == current) {
+                ExpenseInstallmentInfo(installmentAmount, current, current, 0.0, 0.0, paymentsUpToTarget.sumOf { it.amount }, true)
+            } else null
+        }
+        if (i < current) balance -= minOf(installmentAmount, balance)
+        if (balance <= 0.000001 && i < current) return null // ya se pagó la última cuota
+    }
+    val charge = minOf(installmentAmount, balance)
+    val remainingAfterThis = Math.ceil(((balance - charge) / installmentAmount) - 0.000001).toInt().coerceAtLeast(0)
+    return ExpenseInstallmentInfo(
+        installmentAmount = installmentAmount,
+        currentInstallment = current,
+        totalInstallments = current + remainingAfterThis,
+        monthCharge = charge,
+        remainingBalance = balance,
+        paidExtraTotal = paymentsUpToTarget.sumOf { it.amount },
+        isPaidOff = false
+    )
+}

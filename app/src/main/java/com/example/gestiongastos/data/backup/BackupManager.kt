@@ -1,5 +1,6 @@
 package com.example.gestiongastos.data.backup
 
+import com.example.gestiongastos.data.local.ExpensePaymentEntity
 import com.example.gestiongastos.i18n.tr
 import android.content.Context
 import android.content.Intent
@@ -37,6 +38,7 @@ object BackupManager {
     suspend fun generateBackupJson(db: AppDatabase): String = withContext(Dispatchers.IO) {
         val incomes = db.incomeDao().getAllIncomes().first()
         val expenses = db.expenseDao().getAllExpenses().first()
+        val expensePayments = db.expensePaymentDao().getAllExpensePayments().first()
         val cards = db.creditCardDao().getAllCreditCards().first()
         val purchases = db.cardPurchaseDao().getAllCardPurchases().first()
         val savings = db.savingsDao().getAllSavings().first()
@@ -85,6 +87,20 @@ object BackupManager {
                         put("isRecurring", it.isRecurring)
                         put("currency", it.currency)
                         put("endDateMillis", it.endDateMillis ?: JSONObject.NULL)
+                        put("installments", it.installments)
+                    })
+                }
+            })
+
+            // Abonos a gastos fijos en cuotas
+            put("expense_payments", JSONArray().apply {
+                expensePayments.forEach {
+                    put(JSONObject().apply {
+                        put("id", it.id)
+                        put("expenseId", it.expenseId)
+                        put("amount", it.amount)
+                        put("date", it.date)
+                        put("yearMonthText", it.yearMonthText)
                     })
                 }
             })
@@ -337,7 +353,24 @@ object BackupManager {
                             date = obj.optLong("date", System.currentTimeMillis()),
                             isRecurring = obj.optBoolean("isRecurring", false),
                             currency = obj.optString("currency", "COP"),
-                            endDateMillis = optNullableLong(obj, "endDateMillis")
+                            endDateMillis = optNullableLong(obj, "endDateMillis"),
+                            installments = obj.optInt("installments", 0).coerceAtLeast(0)
+                        )
+                    )
+                }
+            }
+
+            val expensePaymentsList = mutableListOf<ExpensePaymentEntity>()
+            root.optJSONArray("expense_payments")?.let { array ->
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i) ?: continue
+                    expensePaymentsList.add(
+                        ExpensePaymentEntity(
+                            id = obj.optLong("id", 0L),
+                            expenseId = obj.optLong("expenseId", 0L),
+                            amount = obj.optDouble("amount", 0.0),
+                            date = obj.optLong("date", System.currentTimeMillis()),
+                            yearMonthText = obj.optString("yearMonthText", "")
                         )
                     )
                 }
@@ -528,6 +561,7 @@ object BackupManager {
             db.withTransaction {
                 db.incomeDao().clearAllIncomes()
                 db.expenseDao().clearAllExpenses()
+                db.expensePaymentDao().clearAllPayments()
                 db.creditCardDao().clearAllCreditCards()
                 db.cardPurchaseDao().clearAllCardPurchases()
                 db.savingsDao().clearAllSavings()
@@ -541,6 +575,7 @@ object BackupManager {
 
                 if (incomesList.isNotEmpty()) db.incomeDao().insertAllIncomes(incomesList)
                 if (expensesList.isNotEmpty()) db.expenseDao().insertAllExpenses(expensesList)
+                if (expensePaymentsList.isNotEmpty()) db.expensePaymentDao().insertAllPayments(expensePaymentsList)
                 if (cardsList.isNotEmpty()) db.creditCardDao().insertAllCreditCards(cardsList)
                 if (purchasesList.isNotEmpty()) db.cardPurchaseDao().insertAllCardPurchases(purchasesList)
                 if (savingsList.isNotEmpty()) db.savingsDao().insertAllSavings(savingsList)

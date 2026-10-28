@@ -1399,7 +1399,7 @@ fun AddPaymentDialog(
                 AmountTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = "Monto a abonar",
+                    label = tr("Monto a abonar", "Payment amount"),
                     currency = purchase.currency,
                     prominent = true
                 )

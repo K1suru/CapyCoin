@@ -54,6 +54,24 @@ interface ExpenseDao {
 }
 
 @Dao
+interface ExpensePaymentDao {
+    @Query("SELECT * FROM expense_payments")
+    fun getAllExpensePayments(): Flow<List<ExpensePaymentEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPayment(payment: ExpensePaymentEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllPayments(payments: List<ExpensePaymentEntity>)
+
+    @Query("DELETE FROM expense_payments WHERE expenseId = :expenseId")
+    suspend fun deletePaymentsForExpense(expenseId: Long)
+
+    @Query("DELETE FROM expense_payments")
+    suspend fun clearAllPayments()
+}
+
+@Dao
 interface CreditCardDao {
     @Query("SELECT * FROM credit_cards ORDER BY id ASC")
     fun getAllCreditCards(): Flow<List<CreditCardEntity>>

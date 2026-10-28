@@ -27,7 +27,18 @@ data class ExpenseEntity(
     val date: Long, // timestamp in millis
     val isRecurring: Boolean = false,
     val currency: String = "COP", // "COP" or "USD"
-    val endDateMillis: Long? = null // Último mes en que aplica un gasto recurrente (null = sin fin)
+    val endDateMillis: Long? = null, // Último mes en que aplica un gasto recurrente (null = sin fin)
+    val installments: Int = 0 // Gasto en cuotas (p. ej. una deuda con una persona): 0 = no es en cuotas
+)
+
+/** Abono a un gasto fijo en cuotas: baja el saldo pendiente sin cambiar el valor de la cuota. */
+@Entity(tableName = "expense_payments")
+data class ExpensePaymentEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val expenseId: Long,
+    val amount: Double,
+    val date: Long, // timestamp in millis
+    val yearMonthText: String // e.g. "2026-11"
 )
 
 @Entity(tableName = "credit_cards")

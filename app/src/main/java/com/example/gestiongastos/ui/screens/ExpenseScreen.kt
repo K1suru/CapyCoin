@@ -1,5 +1,8 @@
 package com.example.gestiongastos.ui.screens
 
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.i18n.appLocale
 import com.example.gestiongastos.ui.components.rememberAnimatedAmount
@@ -137,7 +140,8 @@ sealed class UnifiedExpenseItem {
 
     data class DirectExpense(
         val expense: ExpenseEntity,
-        override val isCarriedOver: Boolean
+        override val isCarriedOver: Boolean,
+        val installment: ExpenseInstallmentInfo? = null // solo si es un gasto fijo en cuotas
     ) : UnifiedExpenseItem() {
         override val key: String = "direct_${expense.id}"
         override val concept: String = expense.concept
@@ -201,8 +205,10 @@ fun ExpenseScreen(
     onAddDialogRequestHandled: () -> Unit = {},
     onToggleIgnoreExpense: (itemKey: String) -> Unit = {},
     onTogglePaidExpense: (itemKey: String) -> Unit = {},
-    onAddExpense: (concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean, currency: String) -> Unit,
+    onAddExpense: (concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean, currency: String, installments: Int) -> Unit,
     onUpdateExpense: (ExpenseEntity) -> Unit,
+    expenseInstallments: Map<Long, ExpenseInstallmentInfo> = emptyMap(),
+    onAddExpensePayment: (expenseId: Long, amount: Double) -> Unit = { _, _ -> },
     onDeleteExpense: (ExpenseEntity) -> Unit,
     onEndExpenseFromMonth: (ExpenseEntity) -> Unit = {},
     onEndSavingFromMonth: (SavingsEntity) -> Unit = {},
@@ -219,6 +225,7 @@ fun ExpenseScreen(
     var searchQuery by remember { mutableStateOf("") }
 
     var expenseToEdit by remember { mutableStateOf<ExpenseEntity?>(null) }
+    var expenseToPay by remember { mutableStateOf<UnifiedExpenseItem.DirectExpense?>(null) }
     var purchaseToEdit by remember { mutableStateOf<PurchaseInstallmentDetail?>(null) }
     var savingToEdit by remember { mutableStateOf<SavingsEntity?>(null) }
     var itemToDelete by remember { mutableStateOf<UnifiedExpenseItem?>(null) }
@@ -232,14 +239,15 @@ fun ExpenseScreen(
     }
 
     // Build unified expenses list
-    val allUnifiedItems = remember(expenses, cardSummaries, savings, selectedYearMonth, installmentsPosition, expenseSortOrder, usdRate) {
+    val allUnifiedItems = remember(expenses, expenseInstallments, cardSummaries, savings, selectedYearMonth, installmentsPosition, expenseSortOrder, usdRate) {
         val rawList = mutableListOf<UnifiedExpenseItem>()
 
         // 1. Direct Expenses
         expenses.forEach { exp ->
             val expYm = YearMonth.from(Instant.ofEpochMilli(exp.date).atZone(ZoneId.systemDefault()).toLocalDate())
-            val isCarriedOver = exp.isRecurring || expYm.isBefore(selectedYearMonth)
-            rawList.add(UnifiedExpenseItem.DirectExpense(exp, isCarriedOver))
+            val installment = expenseInstallments[exp.id]
+            val isCarriedOver = exp.isRecurring || expYm.isBefore(selectedYearMonth) || installment != null
+            rawList.add(UnifiedExpenseItem.DirectExpense(exp, isCarriedOver, installment))
         }
 
         // 2. Card Purchases and Maintenance Fees
@@ -609,9 +617,14 @@ fun ExpenseScreen(
                             isPrivacyMode = isPrivacyMode,
                             onToggleIgnore = { onToggleIgnoreExpense(item.key) },
                             onTogglePaid = { onTogglePaidExpense(item.key) },
+                            onAddPayment = if (item is UnifiedExpenseItem.DirectExpense && item.installment?.isPaidOff == false) {
+                                { expenseToPay = item }
+                            } else null,
                             onEdit = {
                                 when (item) {
-                                    is UnifiedExpenseItem.DirectExpense -> expenseToEdit = item.expense
+                                    // En cuotas, `amount` es el cobro del mes: se edita con el valor fijo de la cuota
+                                    is UnifiedExpenseItem.DirectExpense -> expenseToEdit = item.installment
+                                        ?.let { item.expense.copy(amount = it.installmentAmount) } ?: item.expense
                                     is UnifiedExpenseItem.CardInstallmentExpense -> purchaseToEdit = item.detail
                                     is UnifiedExpenseItem.SavingsExpense -> savingToEdit = item.saving
                                     is UnifiedExpenseItem.CardFeeExpense -> { /* Read-only fee */ }
@@ -633,8 +646,8 @@ fun ExpenseScreen(
             allCards = allCards,
             selectedYearMonth = selectedYearMonth,
             onDismiss = { showAddDialog = false },
-            onSaveExpense = { concept, amount, dateMillis, isRecurring, currency ->
-                onAddExpense(concept, amount, dateMillis, isRecurring, currency)
+            onSaveExpense = { concept, amount, dateMillis, isRecurring, currency, installments ->
+                onAddExpense(concept, amount, dateMillis, isRecurring, currency, installments)
                 showAddDialog = false
             },
             onSaveCardPurchase = { cardId, concept, totalAmount, installments, purchaseDateMillis, isInterestFree, isRecurring, currency ->
@@ -658,6 +671,20 @@ fun ExpenseScreen(
                 expenseToEdit = null
             }
         )
+    }
+
+    expenseToPay?.let { item ->
+        item.installment?.let { info ->
+            ExpensePaymentDialog(
+                expense = item.expense,
+                info = info,
+                onDismiss = { expenseToPay = null },
+                onSave = { amount ->
+                    onAddExpensePayment(item.expense.id, amount)
+                    expenseToPay = null
+                }
+            )
+        }
     }
 
     if (savingToEdit != null) {
@@ -690,7 +717,9 @@ fun ExpenseScreen(
                 item is UnifiedExpenseItem.SavingsExpense && item.saving.isRecurring -> ({ onEndSavingFromMonth(item.saving) })
                 else -> null
             },
-            extraMessage = if (item is UnifiedExpenseItem.CardInstallmentExpense) {
+            extraMessage = if (item is UnifiedExpenseItem.DirectExpense && item.installment != null) {
+                tr("Se eliminará la deuda completa con todas sus cuotas y abonos.", "The whole debt will be deleted, with all its installments and extra payments.")
+            } else if (item is UnifiedExpenseItem.CardInstallmentExpense) {
                 tr("Se eliminará la compra completa con todas sus cuotas y abonos. Para saltar solo este mes usa \"Omitir este Mes\" en Tarjetas.", "The whole purchase will be deleted, with all its installments and payments. To skip just this month, use \"Skip this month\" in Cards.")
             } else null
         )
@@ -782,6 +811,7 @@ fun SectionHeader(title: String, amountText: String? = null, isPrivacyMode: Bool
 
 private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExpenseItemCard(
     item: UnifiedExpenseItem,
@@ -791,6 +821,7 @@ fun ExpenseItemCard(
     isPrivacyMode: Boolean = false,
     onToggleIgnore: () -> Unit = {},
     onTogglePaid: () -> Unit = {},
+    onAddPayment: (() -> Unit)? = null,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -798,7 +829,13 @@ fun ExpenseItemCard(
     val haptic = LocalHapticFeedback.current
     val (icon, iconBg, iconColor, categoryName) = when (item) {
         is UnifiedExpenseItem.DirectExpense -> {
-            val label = if (item.expense.isRecurring) tr("Gasto Fijo • Recurrente", "Fixed expense • Recurring") else tr("Gasto Fijo", "Fixed expense")
+            val inst = item.installment
+            val label = when {
+                inst?.isPaidOff == true -> tr("Saldado ✓", "Paid off ✓")
+                inst != null -> tr("Cuota ${inst.currentInstallment} de ${inst.totalInstallments}", "Installment ${inst.currentInstallment} of ${inst.totalInstallments}")
+                item.expense.isRecurring -> tr("Recurrente", "Recurring")
+                else -> tr("Gasto Fijo", "Fixed expense")
+            }
             Quadruple(
                 Icons.AutoMirrored.Filled.TrendingDown,
                 FinanceColors.expenseContainer(isDark),
@@ -930,8 +967,10 @@ fun ExpenseItemCard(
                         softWrap = true
                     )
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    // Si las etiquetas no caben juntas, "Ignorado" pasa a la siguiente línea en vez de cortarse
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.padding(top = 1.dp)
                     ) {
                         Surface(
@@ -970,7 +1009,6 @@ fun ExpenseItemCard(
                         }
 
                         if (isIgnored) {
-                            Spacer(modifier = Modifier.width(4.dp))
                             Surface(
                                 color = FinanceColors.goldContainer(isDark),
                                 shape = RoundedCornerShape(6.dp)
@@ -1092,6 +1130,23 @@ fun ExpenseItemCard(
                             }
                         )
 
+                        if (onAddPayment != null) {
+                            DropdownMenuItem(
+                                text = { Text(tr("Hacer abono", "Make extra payment"), style = MaterialTheme.typography.bodyMedium) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Payment,
+                                        contentDescription = null,
+                                        tint = FinanceColors.incomeAccent(isDark)
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    onAddPayment()
+                                }
+                            )
+                        }
+
                         if (item !is UnifiedExpenseItem.CardFeeExpense) {
                             DropdownMenuItem(
                                 text = { Text(tr("Editar", "Edit"), style = MaterialTheme.typography.bodyMedium) },
@@ -1154,6 +1209,16 @@ fun ExpenseItemCard(
                     }
                 }
             }
+        }
+
+        // Avance de la deuda a todo el ancho, alineado con el nombre (debajo del ícono no va nada)
+        if (item is UnifiedExpenseItem.DirectExpense && item.installment != null) {
+            ExpenseInstallmentProgress(
+                info = item.installment,
+                currency = item.expense.currency,
+                isPrivacyMode = isPrivacyMode,
+                modifier = Modifier.padding(start = 60.dp, end = 16.dp, bottom = 12.dp)
+            )
         }
     }
 
@@ -1301,7 +1366,7 @@ fun AddEditExpenseDialog(
     allCards: List<CreditCardEntity>,
     selectedYearMonth: YearMonth,
     onDismiss: () -> Unit,
-    onSaveExpense: (concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean, currency: String) -> Unit,
+    onSaveExpense: (concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean, currency: String, installments: Int) -> Unit,
     onSaveCardPurchase: (cardId: Long, concept: String, totalAmount: Double, installments: Int, purchaseDateMillis: Long, isInterestFree: Boolean, isRecurring: Boolean, currency: String) -> Unit,
     onSaveSavings: (concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean) -> Unit
 ) {
@@ -1312,6 +1377,8 @@ fun AddEditExpenseDialog(
     var amountText by remember { mutableStateOf("") }
     var isRecurring by remember { mutableStateOf(false) }
     var directCurrency by remember { mutableStateOf("COP") }
+    var isInInstallments by remember { mutableStateOf(false) }
+    var expenseInstallmentsText by remember { mutableStateOf("") }
 
     // Form Compra Tarjeta
     var selectedCardId by remember { mutableLongStateOf(allCards.firstOrNull()?.id ?: 0L) }
@@ -1408,7 +1475,7 @@ fun AddEditExpenseDialog(
                     AmountTextField(
                         value = amountText,
                         onValueChange = { amountText = it },
-                        label = tr("Monto", "Amount"),
+                        label = if (selectedTab == 0 && isInInstallments) tr("Cuota mensual", "Monthly payment") else tr("Monto", "Amount"),
                         currency = if (selectedTab == 0) directCurrency else "COP",
                         prominent = true
                     )
@@ -1477,7 +1544,19 @@ fun AddEditExpenseDialog(
                         }
                     }
 
-                    Row(
+                    if (selectedTab == 0) {
+                        ExpenseInstallmentsFields(
+                            enabled = isInInstallments,
+                            onEnabledChange = { isInInstallments = it },
+                            countText = expenseInstallmentsText,
+                            onCountTextChange = { expenseInstallmentsText = it },
+                            installmentAmount = parseAmount(amountText) ?: 0.0,
+                            currency = directCurrency,
+                            startDateMillis = expenseDateMillis
+                        )
+                    }
+
+                    if (selectedTab == 2 || !isInInstallments) Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 4.dp),
@@ -1727,8 +1806,11 @@ fun AddEditExpenseDialog(
                             errorMessage = tr("Por favor ingresa un concepto", "Enter a name")
                         } else if (amount == null || amount <= 0) {
                             errorMessage = tr("Ingresa un monto válido mayor a 0", "Enter a valid amount greater than 0")
+                        } else if (isInInstallments && parseExpenseInstallments(expenseInstallmentsText) == null) {
+                            errorMessage = tr("Ingresa un número de cuotas entre 1 y $MAX_EXPENSE_INSTALLMENTS", "Enter a number of installments between 1 and $MAX_EXPENSE_INSTALLMENTS")
                         } else {
-                            onSaveExpense(concept.trim(), amount, expenseDateMillis, isRecurring, directCurrency)
+                            val installments = if (isInInstallments) parseExpenseInstallments(expenseInstallmentsText)!! else 0
+                            onSaveExpense(concept.trim(), amount, expenseDateMillis, isRecurring && installments == 0, directCurrency, installments)
                         }
                     } else if (selectedTab == 1) {
                         val totalAmount = parseAmount(cardTotalAmountText)
@@ -1780,6 +1862,8 @@ fun AddEditDirectExpenseDialog(
     var amountText by remember { mutableStateOf(amountToInput(expenseToEdit?.amount, expenseToEdit?.currency == "USD")) }
     var isRecurring by remember { mutableStateOf(expenseToEdit?.isRecurring ?: false) }
     var currency by remember { mutableStateOf(expenseToEdit?.currency ?: "COP") }
+    var isInInstallments by remember { mutableStateOf((expenseToEdit?.installments ?: 0) > 0) }
+    var installmentsText by remember { mutableStateOf(expenseToEdit?.installments?.takeIf { it > 0 }?.toString() ?: "") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val initialDateMillis = remember(expenseToEdit, selectedYearMonth) {
@@ -1810,7 +1894,7 @@ fun AddEditDirectExpenseDialog(
                 AmountTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
-                    label = tr("Monto", "Amount"),
+                    label = if (isInInstallments) tr("Cuota mensual", "Monthly payment") else tr("Monto", "Amount"),
                     currency = currency,
                     prominent = true
                 )
@@ -1877,7 +1961,17 @@ fun AddEditDirectExpenseDialog(
                     }
                 }
 
-                Row(
+                ExpenseInstallmentsFields(
+                    enabled = isInInstallments,
+                    onEnabledChange = { isInInstallments = it },
+                    countText = installmentsText,
+                    onCountTextChange = { installmentsText = it },
+                    installmentAmount = parseAmount(amountText) ?: 0.0,
+                    currency = currency,
+                    startDateMillis = expenseDateMillis
+                )
+
+                if (!isInInstallments) Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp),
@@ -1918,9 +2012,12 @@ fun AddEditDirectExpenseDialog(
                         errorMessage = tr("Por favor ingresa un concepto", "Enter a name")
                     } else if (amount == null || amount <= 0) {
                         errorMessage = tr("Ingresa un monto válido mayor a 0", "Enter a valid amount greater than 0")
+                    } else if (isInInstallments && parseExpenseInstallments(installmentsText) == null) {
+                        errorMessage = tr("Ingresa un número de cuotas entre 1 y $MAX_EXPENSE_INSTALLMENTS", "Enter a number of installments between 1 and $MAX_EXPENSE_INSTALLMENTS")
                     } else {
+                        val installments = if (isInInstallments) parseExpenseInstallments(installmentsText)!! else 0
                         val base = expenseToEdit ?: ExpenseEntity(concept = concept.trim(), amount = amount, date = expenseDateMillis, isRecurring = isRecurring, currency = currency)
-                        onSave(base.copy(concept = concept.trim(), amount = amount, date = expenseDateMillis, isRecurring = isRecurring, currency = currency))
+                        onSave(base.copy(concept = concept.trim(), amount = amount, date = expenseDateMillis, isRecurring = isRecurring && installments == 0, currency = currency, installments = installments))
                     }
                 }
             ) {

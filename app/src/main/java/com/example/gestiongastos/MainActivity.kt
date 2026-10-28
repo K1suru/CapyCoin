@@ -348,6 +348,7 @@ fun GestionGastosApp(
     val summaryUiState by viewModel.summaryUiState.collectAsState()
     val monthlyIncomes by viewModel.monthlyIncomes.collectAsState()
     val monthlyExpenses by viewModel.monthlyExpenses.collectAsState()
+    val expenseInstallments by viewModel.expenseInstallments.collectAsState()
     val monthlySavings by viewModel.monthlySavings.collectAsState()
     val cardSummaries by viewModel.cardSummaries.collectAsState()
     val allCards by viewModel.allCreditCards.collectAsState()
@@ -578,7 +579,8 @@ fun GestionGastosApp(
                         savings = monthlySavings,
                         selectedYearMonth = selectedYearMonth,
                         usdRate = usdRate,
-                        ignoredKeys = ignoredKeys
+                        ignoredKeys = ignoredKeys,
+                        expenseInstallments = expenseInstallments
                     )
                 },
                 onShareAppApk = {
@@ -857,10 +859,12 @@ fun GestionGastosApp(
                         onAddDialogRequestHandled = { pendingAddExpenseDialog = false },
                         onToggleIgnoreExpense = { viewModel.toggleIgnoredExpense(it) },
                         onTogglePaidExpense = { viewModel.togglePaidExpense(it) },
-                        onAddExpense = { concept, amount, dateMillis, isRecurring, currency ->
-                            viewModel.addExpense(concept, amount, dateMillis, isRecurring, currency)
+                        onAddExpense = { concept, amount, dateMillis, isRecurring, currency, installments ->
+                            viewModel.addExpense(concept, amount, dateMillis, isRecurring, currency, installments)
                         },
                         onUpdateExpense = { viewModel.updateExpense(it) },
+                        expenseInstallments = expenseInstallments,
+                        onAddExpensePayment = { id, amount -> viewModel.addExpensePayment(id, amount) },
                         onDeleteExpense = { viewModel.deleteExpense(it) },
                         onEndExpenseFromMonth = { viewModel.endExpenseFromSelectedMonth(it) },
                         onEndSavingFromMonth = { viewModel.endSavingFromSelectedMonth(it) },

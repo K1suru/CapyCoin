@@ -130,6 +130,23 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
     }
 }
 
+val MIGRATION_22_23 = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE expenses ADD COLUMN installments INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS expense_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                expenseId INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                date INTEGER NOT NULL,
+                yearMonthText TEXT NOT NULL
+            )
+            """.trimIndent()
+        )
+    }
+}
+
 @Database(
     entities = [
         IncomeEntity::class,
@@ -143,9 +160,10 @@ val MIGRATION_21_22 = object : Migration(21, 22) {
         PaidCreditCardEntity::class,
         PaidExpenseEntity::class,
         SettledPurchaseEntity::class,
-        ReceivedIncomeEntity::class
+        ReceivedIncomeEntity::class,
+        ExpensePaymentEntity::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -162,6 +180,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun paidExpenseDao(): PaidExpenseDao
     abstract fun settledPurchaseDao(): SettledPurchaseDao
     abstract fun receivedIncomeDao(): ReceivedIncomeDao
+    abstract fun expensePaymentDao(): ExpensePaymentDao
 
     companion object {
         @Volatile
@@ -187,7 +206,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_18_19,
                         MIGRATION_19_20,
                         MIGRATION_20_21,
-                        MIGRATION_21_22
+                        MIGRATION_21_22,
+                        MIGRATION_22_23
                     )
                     .fallbackToDestructiveMigrationOnDowngrade(true)
                     .build()

@@ -1,5 +1,6 @@
 package com.example.gestiongastos.ui.components
 
+import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.i18n.appLocale
 import android.content.ContentValues
@@ -48,7 +49,8 @@ fun exportMonthlyCsvReport(
     savings: List<SavingsEntity>,
     selectedYearMonth: YearMonth,
     usdRate: Double = DEFAULT_USD_RATE,
-    ignoredKeys: Set<String> = emptySet()
+    ignoredKeys: Set<String> = emptySet(),
+    expenseInstallments: Map<Long, ExpenseInstallmentInfo> = emptyMap()
 ) {
     val monthName = selectedYearMonth.month
         .getDisplayName(TextStyle.FULL, appLocale())
@@ -138,7 +140,12 @@ fun exportMonthlyCsvReport(
         expenses.forEach { exp ->
             val dateStr = dateFormat.format(Date(exp.date))
             val cop = if (exp.currency == "USD") exp.amount * usdRate else exp.amount
-            val typeStr = if (exp.isRecurring) tr("Fijo Recurrente", "Recurring fixed") else tr("Gasto Único", "One-time expense")
+            val inst = expenseInstallments[exp.id]
+            val typeStr = when {
+                inst != null -> tr("Cuota ${inst.currentInstallment} de ${inst.totalInstallments}", "Installment ${inst.currentInstallment} of ${inst.totalInstallments}")
+                exp.isRecurring -> tr("Fijo Recurrente", "Recurring fixed")
+                else -> tr("Gasto Único", "One-time expense")
+            }
             val ignored = if (ItemKeys.direct(exp.id) in ignoredKeys) ignoredSuffix else ""
             sb.appendLine("\"${exp.concept.replace("\"", "\"\"")}\";${csvNumber(cop)};${exp.currency};${csvNumber(exp.amount)};$typeStr;$dateStr$ignored")
         }

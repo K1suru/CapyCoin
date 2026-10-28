@@ -1,5 +1,7 @@
 package com.example.gestiongastos.ui.viewmodel
 
+import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
+import com.example.gestiongastos.data.local.ExpensePaymentEntity
 import com.example.gestiongastos.i18n.I18n
 import com.example.gestiongastos.i18n.AppLanguage
 import android.app.Application
@@ -122,6 +124,8 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     val monthlyIncomes: StateFlow<List<IncomeEntity>>
     val monthlyExpenses: StateFlow<List<ExpenseEntity>>
+    /** Detalle de los gastos fijos en cuotas del mes (cuota k de N, saldo, abonos), por id de gasto. */
+    val expenseInstallments: StateFlow<Map<Long, ExpenseInstallmentInfo>>
     val monthlySavings: StateFlow<List<SavingsEntity>>
     val cardSummaries: StateFlow<List<CardMonthSummary>>
     val allCreditCards: StateFlow<List<CreditCardEntity>>
@@ -179,9 +183,13 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             repository.getIncomesForMonth(ym)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-        monthlyExpenses = _selectedYearMonth.flatMapLatest { ym ->
+        val expenseData = _selectedYearMonth.flatMapLatest { ym ->
             repository.getExpensesForMonth(ym)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<ExpenseEntity>() to emptyMap())
+        monthlyExpenses = expenseData.map { it.first }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        expenseInstallments = expenseData.map { it.second }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
         monthlySavings = _selectedYearMonth.flatMapLatest { ym ->
             repository.getSavingsForMonth(ym)
@@ -403,15 +411,30 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // CRUD Expenses
-    fun addExpense(concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean, currency: String = "COP") {
+    fun addExpense(concept: String, amount: Double, dateMillis: Long, isRecurring: Boolean, currency: String = "COP", installments: Int = 0) {
         viewModelScope.launch {
             repository.addExpense(
                 ExpenseEntity(
                     concept = concept,
                     amount = amount,
                     date = dateMillis,
-                    isRecurring = isRecurring,
-                    currency = currency
+                    isRecurring = isRecurring && installments == 0,
+                    currency = currency,
+                    installments = installments
+                )
+            )
+        }
+    }
+
+    /** Abono a un gasto fijo en cuotas, aplicado en el mes seleccionado. */
+    fun addExpensePayment(expenseId: Long, amount: Double) {
+        viewModelScope.launch {
+            repository.addExpensePayment(
+                ExpensePaymentEntity(
+                    expenseId = expenseId,
+                    amount = amount,
+                    date = System.currentTimeMillis(),
+                    yearMonthText = _selectedYearMonth.value.toString()
                 )
             )
         }
