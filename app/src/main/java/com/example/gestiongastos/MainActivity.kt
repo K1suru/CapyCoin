@@ -5,6 +5,7 @@ import com.example.gestiongastos.i18n.tr
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import com.example.gestiongastos.data.backup.BackupManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -164,6 +165,7 @@ class MainActivity : FragmentActivity() {
 
     companion object {
         private const val REQUEST_CODE_RESTORE_BACKUP = 1001
+        private const val REQUEST_CODE_EXPORT_BACKUP = 1002
 
         // Tiempo en segundo plano tras el cual se vuelve a pedir la huella
         private const val RELOCK_TIMEOUT_MILLIS = 30_000L
@@ -189,6 +191,27 @@ class MainActivity : FragmentActivity() {
     }
 
     private var onRestoreFilePicked: ((Uri) -> Unit)? = null
+    private var onExportFileCreated: ((Uri) -> Unit)? = null
+
+    /** Pide al usuario dónde guardar la copia (Descargas, Drive, etc.) y devuelve el archivo creado. */
+    fun launchExportBackupPicker(
+        fileName: String,
+        onCreated: (Uri) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        this.onExportFileCreated = onCreated
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+        }
+        try {
+            startActivityForResult(intent, REQUEST_CODE_EXPORT_BACKUP)
+        } catch (e: Exception) {
+            onExportFileCreated = null
+            onError(tr("No se pudo abrir el selector de archivos: ${e.localizedMessage ?: e.message}", "Couldn't open the file picker: ${e.localizedMessage ?: e.message}"))
+        }
+    }
 
     fun launchRestoreBackupPicker(
         onPicked: (Uri) -> Unit,
@@ -224,6 +247,12 @@ class MainActivity : FragmentActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_CODE_EXPORT_BACKUP) {
+            val callback = onExportFileCreated
+            onExportFileCreated = null
+            if (resultCode == RESULT_OK) data?.data?.let { uri -> callback?.invoke(uri) }
+            return
+        }
         if (requestCode == REQUEST_CODE_RESTORE_BACKUP && resultCode == RESULT_OK) {
             data?.data?.let { uri ->
                 try {
@@ -544,7 +573,7 @@ fun GestionGastosApp(
                     }
                 },
                 onExportBackup = {
-                    viewModel.exportBackup(context) { result ->
+                    val handleExportResult: (Result<String>) -> Unit = { result ->
                         result.onSuccess { msg ->
                             backupStatusMessage = msg
                             showBackupResultDialog = true
@@ -552,6 +581,19 @@ fun GestionGastosApp(
                             backupStatusMessage = tr("Error al exportar copia: ${err.message}", "Couldn't export the backup: ${err.message}")
                             showBackupResultDialog = true
                         }
+                    }
+                    if (activity != null) {
+                        // El usuario elige la carpeta y la copia se escribe ahí directamente
+                        activity.launchExportBackupPicker(
+                            fileName = BackupManager.newBackupFileName(),
+                            onCreated = { uri -> viewModel.saveBackupTo(context, uri, handleExportResult) },
+                            onError = { errMsg ->
+                                backupStatusMessage = errMsg
+                                showBackupResultDialog = true
+                            }
+                        )
+                    } else {
+                        viewModel.exportBackup(context, handleExportResult)
                     }
                 },
                 onRestoreBackup = {

@@ -289,6 +289,35 @@ object BackupManager {
         }
     }
 
+    fun newBackupFileName(): String {
+        val timeStamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.getDefault()).format(Date())
+        return "CapyCoin_Backup_$timeStamp.json"
+    }
+
+    /** Escribe la copia completa en el archivo que el usuario eligió con el selector del sistema. */
+    suspend fun saveBackupTo(
+        context: Context,
+        db: AppDatabase,
+        uri: Uri
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val jsonString = generateBackupJson(db)
+            val root = JSONObject(jsonString)
+            context.contentResolver.openOutputStream(uri, "wt")?.use { out ->
+                out.write(jsonString.toByteArray(Charsets.UTF_8))
+            } ?: return@withContext Result.failure(Exception(tr("No se pudo escribir el archivo.", "Couldn't write the file.")))
+            val purchasesCount = root.optJSONArray("card_purchases")?.length() ?: 0
+            val expensesCount = root.optJSONArray("expenses")?.length() ?: 0
+            val incomesCount = root.optJSONArray("incomes")?.length() ?: 0
+            Result.success(tr(
+                "Copia guardada correctamente:\n• $incomesCount ingresos\n• $expensesCount gastos fijos\n• $purchasesCount compras con tarjeta",
+                "Backup saved:\n• $incomesCount income items\n• $expensesCount fixed expenses\n• $purchasesCount card purchases"
+            ))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun restoreBackup(
         context: Context,
         uri: Uri,

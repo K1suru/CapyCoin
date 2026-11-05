@@ -199,7 +199,7 @@ fun QuickExpenseCoverScreen(
                         concept.trim(),
                         parsedAmount,
                         1,
-                        saveDate,
+                        System.currentTimeMillis(), // fecha real; el corte decide el mes de cobro
                         true,
                         false,
                         currency

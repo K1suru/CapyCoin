@@ -693,18 +693,15 @@ fun CreditCardScreen(
                     val currentMonthItems = currentCardSummary.purchases.filter { !isDeferredOrRecurring(it) }
                     val deferredOrRecurringItems = currentCardSummary.purchases.filter { isDeferredOrRecurring(it) }
 
-                    val sortedCurrentMonth = when (expenseSortOrder) {
-                        ExpenseSortOrder.NEWEST_FIRST -> currentMonthItems.sortedWith(
-                            compareByDescending<PurchaseInstallmentDetail> { it.purchaseDateMillis }.thenByDescending { it.purchaseId }
-                        )
-                        ExpenseSortOrder.OLDEST_FIRST -> currentMonthItems.sortedWith(
-                            compareBy<PurchaseInstallmentDetail> { it.purchaseDateMillis }.thenBy { it.purchaseId }
-                        )
-                    }
-
-                    val sortedDeferredOrRecurring = deferredOrRecurringItems.sortedWith(
-                        compareByDescending<PurchaseInstallmentDetail> { it.purchaseDateMillis }.thenByDescending { it.purchaseId }
+                    // Por día y luego por orden de registro (id); la hora no sirve porque lo
+                    // registrado viendo otro mes queda el día 15 con la hora del momento
+                    val oldestFirst = compareBy<PurchaseInstallmentDetail>(
+                        { Instant.ofEpochMilli(it.purchaseDateMillis).atZone(ZoneId.systemDefault()).toLocalDate() },
+                        { it.purchaseId }
                     )
+                    val order = if (expenseSortOrder == ExpenseSortOrder.OLDEST_FIRST) oldestFirst else oldestFirst.reversed()
+                    val sortedCurrentMonth = currentMonthItems.sortedWith(order)
+                    val sortedDeferredOrRecurring = deferredOrRecurringItems.sortedWith(order)
 
                     if (installmentsPosition == InstallmentPosition.FIRST) {
                         sortedDeferredOrRecurring + sortedCurrentMonth
@@ -1716,8 +1713,9 @@ fun AddEditPurchaseDialog(
     var currency by remember { mutableStateOf(purchaseToEdit?.currency ?: "COP") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val initialDateMillis = remember(purchaseToEdit, selectedYearMonth) {
-        calculateSaveDateForMonth(selectedYearMonth, purchaseToEdit?.purchaseDateMillis)
+    // Compra nueva: fecha real de hoy. El mes en que se cobra lo decide el día de corte de la tarjeta.
+    val initialDateMillis = remember(purchaseToEdit) {
+        purchaseToEdit?.purchaseDateMillis ?: System.currentTimeMillis()
     }
     var purchaseDateMillis by remember(purchaseToEdit, selectedYearMonth) { mutableLongStateOf(initialDateMillis) }
 

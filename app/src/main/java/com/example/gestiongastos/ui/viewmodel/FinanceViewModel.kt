@@ -609,6 +609,13 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun saveBackupTo(context: Context, uri: Uri, onResult: (Result<String>) -> Unit) {
+        viewModelScope.launch {
+            val db = AppDatabase.getDatabase(context)
+            onResult(BackupManager.saveBackupTo(context, db, uri))
+        }
+    }
+
     fun restoreBackup(context: Context, uri: Uri, onResult: (Result<String>) -> Unit) {
         viewModelScope.launch {
             val db = AppDatabase.getDatabase(context)

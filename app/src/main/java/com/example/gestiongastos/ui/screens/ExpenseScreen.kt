@@ -275,20 +275,11 @@ fun ExpenseScreen(
         val currentMonthItems = rawList.filter { !it.isCarriedOver }
         val carriedOverItems = rawList.filter { it.isCarriedOver }
 
-        // Sort current month items according to user preference
-        val sortedCurrentMonthItems = when (expenseSortOrder) {
-            ExpenseSortOrder.NEWEST_FIRST -> currentMonthItems.sortedWith(
-                compareByDescending<UnifiedExpenseItem> { it.dateMillis }.thenByDescending { it.key }
-            )
-            ExpenseSortOrder.OLDEST_FIRST -> currentMonthItems.sortedWith(
-                compareBy<UnifiedExpenseItem> { it.dateMillis }.thenBy { it.key }
-            )
-        }
-
-        // Sort carried over items cleanly by date / key
-        val sortedCarriedOverItems = carriedOverItems.sortedWith(
-            compareByDescending<UnifiedExpenseItem> { it.dateMillis }.thenBy { it.key }
-        )
+        // Ambos grupos siguen la preferencia del usuario (ver registrationOrder)
+        val oldestFirst = registrationOrder
+        val order = if (expenseSortOrder == ExpenseSortOrder.OLDEST_FIRST) oldestFirst else oldestFirst.reversed()
+        val sortedCurrentMonthItems = currentMonthItems.sortedWith(order)
+        val sortedCarriedOverItems = carriedOverItems.sortedWith(order)
 
         // Assemble list based on installmentsPosition setting
         if (installmentsPosition == InstallmentPosition.FIRST) {
@@ -753,6 +744,31 @@ fun ExpenseScreen(
         )
     }
 }
+
+/**
+ * Orden de registro (antiguos primero): por día y, dentro del mismo día, por tipo e id.
+ * No se usa la hora porque lo registrado viendo otro mes queda el día 15 con la hora del momento,
+ * y entonces lo anotado de noche quedaba después de lo anotado en la mañana de días posteriores.
+ */
+private val registrationOrder: Comparator<UnifiedExpenseItem> = compareBy(
+    { Instant.ofEpochMilli(it.dateMillis).atZone(ZoneId.systemDefault()).toLocalDate() },
+    {
+        when (it) {
+            is UnifiedExpenseItem.DirectExpense -> 0
+            is UnifiedExpenseItem.CardInstallmentExpense -> 1
+            is UnifiedExpenseItem.CardFeeExpense -> 2
+            is UnifiedExpenseItem.SavingsExpense -> 3
+        }
+    },
+    {
+        when (it) {
+            is UnifiedExpenseItem.DirectExpense -> it.expense.id
+            is UnifiedExpenseItem.CardInstallmentExpense -> it.detail.purchaseId
+            is UnifiedExpenseItem.CardFeeExpense -> it.cardId
+            is UnifiedExpenseItem.SavingsExpense -> it.saving.id
+        }
+    }
+)
 
 /** Monto del ítem en COP (los USD se convierten con la TRM). */
 fun UnifiedExpenseItem.amountInCop(usdRate: Double): Double = when (this) {
@@ -1397,6 +1413,9 @@ fun AddEditExpenseDialog(
 
     val context = LocalContext.current
     val datePickerDialog = rememberDatePicker(expenseDateMillis) { expenseDateMillis = it }
+    // Las compras con tarjeta guardan la fecha real; el mes de cobro lo decide el día de corte
+    var cardDateMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val cardDatePickerDialog = rememberDatePicker(cardDateMillis) { cardDateMillis = it }
 
     val purchaseDateFormat = remember { SimpleDateFormat(tr("dd 'de' MMMM 'de' yyyy", "MMMM d, yyyy"), appLocale()) }
 
@@ -1678,12 +1697,12 @@ fun AddEditExpenseDialog(
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = purchaseDateFormat.format(Date(expenseDateMillis)),
+                                        text = purchaseDateFormat.format(Date(cardDateMillis)),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
                                     )
                                 }
                                 IconButton(
-                                    onClick = { datePickerDialog.show() },
+                                    onClick = { cardDatePickerDialog.show() },
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
@@ -1826,7 +1845,7 @@ fun AddEditExpenseDialog(
                             errorMessage = tr("Ingresa al menos 1 cuota", "Enter at least 1 installment")
                         } else {
                             val finalIsInterestFree = if (installments <= 1) false else isInterestFree
-                            onSaveCardPurchase(selectedCardId, cardConcept.trim(), totalAmount, installments, expenseDateMillis, finalIsInterestFree, isCardRecurring, cardCurrency)
+                            onSaveCardPurchase(selectedCardId, cardConcept.trim(), totalAmount, installments, cardDateMillis, finalIsInterestFree, isCardRecurring, cardCurrency)
                         }
                     } else {
                         val amount = parseAmount(amountText)
