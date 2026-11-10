@@ -1,10 +1,16 @@
 package com.example.gestiongastos.ui.screens
 
+import com.example.gestiongastos.ui.components.shortDateFormat
+import com.example.gestiongastos.ui.components.longDateFormat
+import com.example.gestiongastos.ui.components.currencySymbolOf
+import com.example.gestiongastos.ui.components.formatUsdWithCop
+import com.example.gestiongastos.data.repository.localDateOf
+import com.example.gestiongastos.data.model.toCents
 import androidx.compose.ui.text.style.TextOverflow
+import com.example.gestiongastos.data.model.arrangeByRegistration
 import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.i18n.appLocale
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -14,7 +20,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -46,20 +51,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.Reorder
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -76,15 +77,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import com.example.gestiongastos.ui.components.AutoResizedText
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
@@ -119,6 +117,10 @@ import com.example.gestiongastos.data.model.InstallmentStatusType
 import com.example.gestiongastos.data.model.PurchaseInstallmentDetail
 import com.example.gestiongastos.data.model.installmentSchedule
 import com.example.gestiongastos.data.model.payableThisMonth
+import com.example.gestiongastos.data.model.ExtraPaymentCheck
+import com.example.gestiongastos.data.model.checkExtraPayment
+import com.example.gestiongastos.data.model.safePercent
+import com.example.gestiongastos.data.model.isDeferredOrRecurring
 import com.example.gestiongastos.ui.components.ConfirmDeleteDialog
 import com.example.gestiongastos.ui.components.privacyBlur
 import com.example.gestiongastos.ui.components.privateText
@@ -140,17 +142,13 @@ import com.example.gestiongastos.ui.components.FormSheet
 import com.example.gestiongastos.ui.components.rememberDatePicker
 import com.example.gestiongastos.ui.components.amountToInput
 import com.example.gestiongastos.ui.components.formatCurrency
+import com.example.gestiongastos.ui.components.formatMoney
 import com.example.gestiongastos.ui.components.formatUsd
 import com.example.gestiongastos.ui.components.parseAmount
+import com.example.gestiongastos.ui.components.parsePercentRate
 import com.example.gestiongastos.ui.components.calculateSaveDateForMonth
-import java.text.SimpleDateFormat
-import java.time.Instant
-import java.time.LocalTime
-import java.time.ZoneId
 import java.time.YearMonth
-import java.util.Calendar
 import java.util.Date
-import java.util.Locale
 
 @Composable
 fun CreditCardScreen(
@@ -225,7 +223,8 @@ fun CreditCardScreen(
         }
     }
 
-    LaunchedEffect(activeCardId) {
+    // También al cambiar el orden (se cambia desde Gastos o Ajustes)
+    LaunchedEffect(activeCardId, expenseSortOrder) {
         listState.scrollToItem(0)
     }
 
@@ -685,28 +684,14 @@ fun CreditCardScreen(
 
                 // Purchases List
                 val sortedPurchases = remember(currentCardSummary.purchases, selectedYearMonth, installmentsPosition, expenseSortOrder) {
-                    val isDeferredOrRecurring: (PurchaseInstallmentDetail) -> Boolean = { detail ->
-                        val purchaseYm = YearMonth.from(Instant.ofEpochMilli(detail.purchaseDateMillis).atZone(ZoneId.systemDefault()).toLocalDate())
-                        detail.isRecurring || (detail.totalInstallments > 1 && (detail.currentInstallment > 1 || purchaseYm.isBefore(selectedYearMonth)))
-                    }
-
-                    val currentMonthItems = currentCardSummary.purchases.filter { !isDeferredOrRecurring(it) }
-                    val deferredOrRecurringItems = currentCardSummary.purchases.filter { isDeferredOrRecurring(it) }
-
                     // Por día y luego por orden de registro (id); la hora no sirve porque lo
                     // registrado viendo otro mes queda el día 15 con la hora del momento
                     val oldestFirst = compareBy<PurchaseInstallmentDetail>(
-                        { Instant.ofEpochMilli(it.purchaseDateMillis).atZone(ZoneId.systemDefault()).toLocalDate() },
+                        { localDateOf(it.purchaseDateMillis) },
                         { it.purchaseId }
                     )
-                    val order = if (expenseSortOrder == ExpenseSortOrder.OLDEST_FIRST) oldestFirst else oldestFirst.reversed()
-                    val sortedCurrentMonth = currentMonthItems.sortedWith(order)
-                    val sortedDeferredOrRecurring = deferredOrRecurringItems.sortedWith(order)
-
-                    if (installmentsPosition == InstallmentPosition.FIRST) {
-                        sortedDeferredOrRecurring + sortedCurrentMonth
-                    } else {
-                        sortedCurrentMonth + sortedDeferredOrRecurring
+                    arrangeByRegistration(currentCardSummary.purchases, oldestFirst, expenseSortOrder, installmentsPosition) {
+                        it.isDeferredOrRecurring(selectedYearMonth)
                     }
                 }
 
@@ -778,23 +763,23 @@ fun CreditCardScreen(
         )
     }
 
-    if (cardToEdit != null) {
+    cardToEdit?.let { editingCard ->
         AddEditCardDialog(
-            cardToEdit = cardToEdit,
+            cardToEdit = editingCard,
             onDismiss = { cardToEdit = null },
             onSave = { name, cutoffDay, paymentDay, interestRate, maintenanceFee, currency, isFeeWaiverEnabled, minSpend, isFirstInstallmentInterestFree, creditLimit, colorIndex ->
                 onUpdateCard(
-                    cardToEdit!!.copy(
+                    editingCard.copy(
                         name = name,
                         cutoffDay = cutoffDay,
                         paymentDay = paymentDay,
                         interestRate = interestRate,
-                        maintenanceFee = maintenanceFee,
+                        maintenanceFeeCents = toCents(maintenanceFee),
                         currency = currency,
                         isFeeWaiverEnabled = isFeeWaiverEnabled,
-                        minSpendForFeeWaiver = minSpend,
+                        minSpendForFeeWaiverCents = toCents(minSpend),
                         isFirstInstallmentInterestFree = isFirstInstallmentInterestFree,
-                        creditLimit = creditLimit,
+                        creditLimitCents = toCents(creditLimit),
                         colorIndex = colorIndex
                     )
                 )
@@ -837,21 +822,22 @@ fun CreditCardScreen(
         )
     }
 
-    if (purchaseToEdit != null && currentCardSummary != null) {
+    val editingPurchase = purchaseToEdit
+    if (editingPurchase != null && currentCardSummary != null) {
         AddEditPurchaseDialog(
             cardName = currentCardSummary.cardName,
             cardInterestRate = currentCardSummary.interestRate,
             cardFirstInstallmentInterestFree = currentCardSummary.isFirstInstallmentInterestFree,
-            purchaseToEdit = purchaseToEdit,
+            purchaseToEdit = editingPurchase,
             selectedYearMonth = selectedYearMonth,
             onDismiss = { purchaseToEdit = null },
             onSave = { concept, totalAmount, installments, dateMillis, isInterestFree, isRecurring, currency ->
                 onUpdatePurchase(
                     CardPurchaseEntity(
-                        id = purchaseToEdit!!.purchaseId,
-                        cardId = purchaseToEdit!!.cardId,
+                        id = editingPurchase.purchaseId,
+                        cardId = editingPurchase.cardId,
                         concept = concept,
-                        totalAmount = totalAmount,
+                        totalAmountCents = toCents(totalAmount),
                         installments = installments,
                         purchaseDate = dateMillis,
                         isInterestFree = isInterestFree,
@@ -885,25 +871,24 @@ fun CreditCardScreen(
         )
     }
 
-    if (purchaseToPay != null && currentCardSummary != null) {
+    val payingPurchase = purchaseToPay
+    if (payingPurchase != null && currentCardSummary != null) {
         AddPaymentDialog(
-            purchase = purchaseToPay!!,
-            currencySymbol = if (purchaseToPay!!.currency == "USD") "USD $" else "$",
+            purchase = payingPurchase,
             onDismiss = { purchaseToPay = null },
             onSave = { amount ->
                 val dateMillis = calculateSaveDateForMonth(selectedYearMonth)
-                onAddPurchasePayment(purchaseToPay!!.purchaseId, amount, dateMillis)
+                onAddPurchasePayment(payingPurchase.purchaseId, amount, dateMillis)
                 purchaseToPay = null
             }
         )
     }
 
-    if (purchaseToSettle != null) {
-        val purchase = purchaseToSettle!!
+    purchaseToSettle?.let { purchase ->
         val isSettled = purchase.isSettledThisMonth
-        val currencySym = if (purchase.currency == "USD") "USD $" else "$"
+        val currencySym = currencySymbolOf(purchase.currency)
         val amountFormatted = if (purchase.currency == "USD") {
-            "${formatUsd(purchase.remainingBalanceToPay)} (~${formatCurrency(purchase.remainingBalanceToPay * usdRate)})"
+            formatUsdWithCop(purchase.remainingBalanceToPay, usdRate)
         } else {
             formatCurrency(purchase.remainingBalanceToPay, currencySym)
         }
@@ -1001,15 +986,15 @@ fun CreditCardScreen(
         )
     }
 
-    if (purchaseToDelete != null) {
+    purchaseToDelete?.let { deleting ->
         AlertDialog(
             onDismissRequest = { purchaseToDelete = null },
             title = { Text(tr("Eliminar Compra", "Delete purchase")) },
-            text = { Text(tr("¿Deseas eliminar '${purchaseToDelete!!.concept}'?", "Delete '${purchaseToDelete!!.concept}'?")) },
+            text = { Text(tr("¿Deseas eliminar '${deleting.concept}'?", "Delete '${deleting.concept}'?")) },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onDeletePurchase(purchaseToDelete!!.purchaseId)
+                        onDeletePurchase(deleting.purchaseId)
                         purchaseToDelete = null
                     }
                 ) {
@@ -1020,7 +1005,7 @@ fun CreditCardScreen(
                 Row {
                     TextButton(
                         onClick = {
-                            onOmitPurchaseForMonth(purchaseToDelete!!.purchaseId)
+                            onOmitPurchaseForMonth(deleting.purchaseId)
                             purchaseToDelete = null
                         }
                     ) {
@@ -1047,9 +1032,9 @@ fun CardPurchaseItem(
     onDelete: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val dateFormat = SimpleDateFormat(tr("dd MMM yyyy", "MMM d, yyyy"), appLocale())
+    val dateFormat = shortDateFormat()
     val formattedDate = dateFormat.format(Date(purchase.purchaseDateMillis))
-    val currencySymbol = if (purchase.currency == "USD") "USD $" else "$"
+    val currencySymbol = currencySymbolOf(purchase.currency)
     val isDark = isAppDark()
 
     val (badgeBg, badgeText) = when {
@@ -1146,9 +1131,9 @@ fun CardPurchaseItem(
                             }
                         }
 
-                        val totalStr = if (isPrivacyMode) tr("Total: $ ••••••", "Total: $ ••••••") else if (purchase.currency == "USD") tr("Total: ${formatUsd(purchase.totalAmount)} (~${formatCurrency(purchase.totalAmount * usdRate)})", "Total: ${formatUsd(purchase.totalAmount)} (~${formatCurrency(purchase.totalAmount * usdRate)})") else tr("Total: ${formatCurrency(purchase.totalAmount, currencySymbol)}", "Total: ${formatCurrency(purchase.totalAmount, currencySymbol)}")
+                        val totalStr = if (isPrivacyMode) tr("Total: $ ••••••", "Total: $ ••••••") else if (purchase.currency == "USD") tr("Total: ${formatUsdWithCop(purchase.totalAmount, usdRate)}", "Total: ${formatUsdWithCop(purchase.totalAmount, usdRate)}") else tr("Total: ${formatCurrency(purchase.totalAmount, currencySymbol)}", "Total: ${formatCurrency(purchase.totalAmount, currencySymbol)}")
                         val remainingStr = if (!isPrivacyMode && showRemaining) {
-                            if (purchase.currency == "USD") tr(" | Restante: ${formatUsd(purchase.remainingBalanceToPay)} (~${formatCurrency(purchase.remainingBalanceToPay * usdRate)})", " | Remaining: ${formatUsd(purchase.remainingBalanceToPay)} (~${formatCurrency(purchase.remainingBalanceToPay * usdRate)})")
+                            if (purchase.currency == "USD") tr(" | Restante: ${formatUsdWithCop(purchase.remainingBalanceToPay, usdRate)}", " | Remaining: ${formatUsdWithCop(purchase.remainingBalanceToPay, usdRate)}")
                             else tr(" | Restante: ${formatCurrency(purchase.remainingBalanceToPay, currencySymbol)}", " | Remaining: ${formatCurrency(purchase.remainingBalanceToPay, currencySymbol)}")
                         } else ""
 
@@ -1158,7 +1143,7 @@ fun CardPurchaseItem(
                         )
 
                         if (purchase.totalPaidAmount > 0) {
-                            val abonoStr = if (isPrivacyMode) tr("Abonado: $ ••••••", "Paid extra: $ ••••••") else if (purchase.currency == "USD") tr("Abonado: ${formatUsd(purchase.totalPaidAmount)} (~${formatCurrency(purchase.totalPaidAmount * usdRate)})", "Paid extra: ${formatUsd(purchase.totalPaidAmount)} (~${formatCurrency(purchase.totalPaidAmount * usdRate)})") else tr("Abonado: ${formatCurrency(purchase.totalPaidAmount, currencySymbol)}", "Paid extra: ${formatCurrency(purchase.totalPaidAmount, currencySymbol)}")
+                            val abonoStr = if (isPrivacyMode) tr("Abonado: $ ••••••", "Paid extra: $ ••••••") else if (purchase.currency == "USD") tr("Abonado: ${formatUsdWithCop(purchase.totalPaidAmount, usdRate)}", "Paid extra: ${formatUsdWithCop(purchase.totalPaidAmount, usdRate)}") else tr("Abonado: ${formatCurrency(purchase.totalPaidAmount, currencySymbol)}", "Paid extra: ${formatCurrency(purchase.totalPaidAmount, currencySymbol)}")
                             Text(
                                 text = abonoStr,
                                 style = MaterialTheme.typography.bodySmall.copy(
@@ -1355,7 +1340,6 @@ fun CardPurchaseItem(
 @Composable
 fun AddPaymentDialog(
     purchase: PurchaseInstallmentDetail,
-    currencySymbol: String,
     onDismiss: () -> Unit,
     onSave: (amount: Double) -> Unit
 ) {
@@ -1379,23 +1363,26 @@ fun AddPaymentDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = tr("Monto inicial compra: ${formatCurrency(purchase.totalAmount, currencySymbol)}", "Original amount: ${formatCurrency(purchase.totalAmount, currencySymbol)}"),
+                    text = tr("Monto inicial compra: ${formatMoney(purchase.totalAmount, purchase.currency)}", "Original amount: ${formatMoney(purchase.totalAmount, purchase.currency)}"),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 if (purchase.totalPaidAmount > 0) {
                     Text(
-                        text = tr("Abonado acumulado: ${formatCurrency(purchase.totalPaidAmount, currencySymbol)}", "Extra paid so far: ${formatCurrency(purchase.totalPaidAmount, currencySymbol)}"),
+                        text = tr("Abonado acumulado: ${formatMoney(purchase.totalPaidAmount, purchase.currency)}", "Extra paid so far: ${formatMoney(purchase.totalPaidAmount, purchase.currency)}"),
                         style = MaterialTheme.typography.bodySmall.copy(color = FinanceColors.incomeAccent(isAppDark()))
                     )
                 }
                 Text(
-                    text = tr("Saldo pendiente: ${formatCurrency(purchase.remainingBalanceToPay, currencySymbol)}", "Remaining balance: ${formatCurrency(purchase.remainingBalanceToPay, currencySymbol)}"),
+                    text = tr("Saldo pendiente: ${formatMoney(purchase.remainingBalanceToPay, purchase.currency)}", "Remaining balance: ${formatMoney(purchase.remainingBalanceToPay, purchase.currency)}"),
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 )
 
                 AmountTextField(
                     value = amountText,
-                    onValueChange = { amountText = it },
+                    onValueChange = {
+                        amountText = it
+                        errorMessage = null
+                    },
                     label = tr("Monto a abonar", "Payment amount"),
                     currency = purchase.currency,
                     prominent = true
@@ -1413,7 +1400,7 @@ fun AddPaymentDialog(
                                 style = MaterialTheme.typography.bodySmall.copy(color = FinanceColors.incomeText(isAppDark()))
                             )
                             Text(
-                                text = formatCurrency(newBalance, currencySymbol),
+                                text = formatMoney(newBalance, purchase.currency),
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     color = FinanceColors.incomeAccent(isAppDark())
@@ -1423,9 +1410,9 @@ fun AddPaymentDialog(
                     }
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1435,12 +1422,12 @@ fun AddPaymentDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (parsedAmount <= 0) {
-                        errorMessage = tr("Ingresa un monto de abono mayor a 0", "Enter a payment greater than 0")
-                    } else if (parsedAmount > purchase.remainingBalanceToPay) {
-                        errorMessage = tr("El abono no puede ser mayor al saldo de ${formatCurrency(purchase.remainingBalanceToPay, currencySymbol)}", "The payment can't be more than the balance of ${formatCurrency(purchase.remainingBalanceToPay, currencySymbol)}")
-                    } else {
-                        onSave(parsedAmount)
+                    when (val check = checkExtraPayment(parsedAmount, purchase.remainingBalanceToPay, purchase.currency)) {
+                        ExtraPaymentCheck.NotPositive ->
+                            errorMessage = tr("Ingresa un monto de abono mayor a 0", "Enter a payment greater than 0")
+                        ExtraPaymentCheck.ExceedsBalance ->
+                            errorMessage = tr("El abono no puede ser mayor al saldo de ${formatMoney(purchase.remainingBalanceToPay, purchase.currency)}", "The payment can't be more than the balance of ${formatMoney(purchase.remainingBalanceToPay, purchase.currency)}")
+                        is ExtraPaymentCheck.Valid -> onSave(check.amount)
                     }
                 }
             ) {
@@ -1644,9 +1631,9 @@ fun AddEditCardDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1658,7 +1645,8 @@ fun AddEditCardDialog(
                 onClick = {
                     val cutoffDay = cutoffDayText.toIntOrNull()
                     val paymentDay = paymentDayText.toIntOrNull() ?: 0
-                    val interestRate = parseAmount(interestRateText) ?: 0.0
+                    // La tasa se lee como porcentaje: "1.875" es 1,875 %, no 1875
+                    val interestRate = parsePercentRate(interestRateText)
                     val maintenanceFee = parseAmount(maintenanceFeeText) ?: 0.0
                     val minSpend = if (isFeeWaiverEnabled) parseAmount(minSpendText) ?: 0.0 else 0.0
                     val creditLimit = parseAmount(creditLimitText) ?: 0.0
@@ -1669,6 +1657,8 @@ fun AddEditCardDialog(
                         errorMessage = tr("El día de corte debe ser entre 1 y 31", "The statement day must be between 1 and 31")
                     } else if (paymentDay !in 0..31) {
                         errorMessage = tr("El día de pago debe ser entre 1 y 31 (o déjalo vacío)", "The payment day must be between 1 and 31 (or leave it empty)")
+                    } else if (interestRate == null) {
+                        errorMessage = tr("La tasa de interés debe ser un número entre 0 y 100", "The interest rate must be a number between 0 and 100")
                     } else if (isFeeWaiverEnabled && minSpend <= 0) {
                         errorMessage = tr("Ingresa un monto mínimo de consumo válido para la exoneración", "Enter a valid minimum spending amount for the fee waiver")
                     } else {
@@ -1722,7 +1712,7 @@ fun AddEditPurchaseDialog(
     val context = LocalContext.current
     val datePickerDialog = rememberDatePicker(purchaseDateMillis) { purchaseDateMillis = it }
 
-    val purchaseDateFormat = remember { SimpleDateFormat(tr("dd 'de' MMMM 'de' yyyy", "MMMM d, yyyy"), appLocale()) }
+    val purchaseDateFormat = remember { longDateFormat() }
 
     // Live preview calculation of monthly quota
     val parsedTotalAmount = parseAmount(totalAmountText) ?: 0.0
@@ -1913,9 +1903,9 @@ fun AddEditPurchaseDialog(
                     }
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -2381,7 +2371,7 @@ fun PurchaseSimulatorDialog(
                             ) {
                                 Text(tr("Pago Mensual Estimado:", "Estimated monthly payment:"), style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    text = if (selectedCurrency == "USD") "${formatUsd(monthlyPayment)} (~${formatCurrency(monthlyPayment * usdRate)})" else formatCurrency(monthlyPayment),
+                                    text = if (selectedCurrency == "USD") formatUsdWithCop(monthlyPayment, usdRate) else formatCurrency(monthlyPayment),
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         color = FinanceColors.cardText(isDark)
@@ -2639,7 +2629,7 @@ fun CreditCardVisual(
                     )
                     Text(
                         text = if (summary.creditLimit > 0.0) {
-                            privateText(tr("Cupo usado ${(summary.currentMonthSpending / summary.creditLimit * 100).toInt()}%", "Limit used ${(summary.currentMonthSpending / summary.creditLimit * 100).toInt()}%"), isPrivacyMode, tr("Cupo usado ••", "Limit used ••"))
+                            privateText(tr("Cupo usado ${safePercent(summary.currentMonthSpending, summary.creditLimit)}%", "Limit used ${safePercent(summary.currentMonthSpending, summary.creditLimit)}%"), isPrivacyMode, tr("Cupo usado ••", "Limit used ••"))
                         } else {
                             privateText(tr("Deuda ${formatCurrency(summary.currentMonthSpending)}", "Debt ${formatCurrency(summary.currentMonthSpending)}"), isPrivacyMode, tr("Deuda ••••", "Debt ••••"))
                         },

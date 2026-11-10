@@ -1,5 +1,6 @@
 package com.example.gestiongastos
 
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.key
 import com.example.gestiongastos.i18n.tr
 import android.content.Context
@@ -23,7 +24,6 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -32,7 +32,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
@@ -66,10 +65,7 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -89,7 +85,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -116,7 +111,6 @@ import com.example.gestiongastos.ui.theme.AppColorTheme
 import com.example.gestiongastos.ui.theme.AppThemeMode
 import com.example.gestiongastos.ui.theme.GestionGastosTheme
 import com.example.gestiongastos.ui.viewmodel.FinanceViewModel
-import androidx.activity.result.contract.ActivityResultContracts
 
 class MainActivity : FragmentActivity() {
 
@@ -382,6 +376,11 @@ fun GestionGastosApp(
     val cardSummaries by viewModel.cardSummaries.collectAsState()
     val allCards by viewModel.allCreditCards.collectAsState()
     val usdRate by viewModel.usdRate.collectAsState()
+    val isUsdRateOutdated by viewModel.isUsdRateOutdated.collectAsState()
+    // Antes de abrir otra pantalla (selector de archivos, compartir) se quita el foco de cualquier campo:
+    // con un campo enfocado (p. ej. el buscador de Gastos) Compose 1.7 lanza un NullPointerException
+    // al perder la ventana y la app se cerraba, dejando la copia de seguridad vacía.
+    val focusManager = LocalFocusManager.current
     val ignoredKeys by viewModel.ignoredExpenseKeys.collectAsState()
     val paidCardIds by viewModel.paidCreditCardIds.collectAsState()
     val paidExpenseKeys by viewModel.paidExpenseKeys.collectAsState()
@@ -573,6 +572,7 @@ fun GestionGastosApp(
                     }
                 },
                 onExportBackup = {
+                    focusManager.clearFocus(force = true)
                     val handleExportResult: (Result<String>) -> Unit = { result ->
                         result.onSuccess { msg ->
                             backupStatusMessage = msg
@@ -597,6 +597,7 @@ fun GestionGastosApp(
                     }
                 },
                 onRestoreBackup = {
+                    focusManager.clearFocus(force = true)
                     if (activity != null) {
                         activity.launchRestoreBackupPicker(
                             onPicked = { uri ->
@@ -613,6 +614,7 @@ fun GestionGastosApp(
                     }
                 },
                 onExportCsv = {
+                    focusManager.clearFocus(force = true)
                     exportMonthlyCsvReport(
                         context = context,
                         incomes = monthlyIncomes,
@@ -626,6 +628,7 @@ fun GestionGastosApp(
                     )
                 },
                 onShareAppApk = {
+                    focusManager.clearFocus(force = true)
                     shareAppApk(context)
                 },
                 currentLanguage = viewModel.language.collectAsState().value,
@@ -658,11 +661,12 @@ fun GestionGastosApp(
                     val currentViewingRoute = pagerScreens.getOrNull(pagerState.currentPage)?.route
 
                     val targetIndex = remember(draggedBottomIndex, bottomDragOffsetX, tabWidthPx, bottomScreens.size) {
-                        if (draggedBottomIndex != null && tabWidthPx > 0) {
-                            (draggedBottomIndex!! + (bottomDragOffsetX / tabWidthPx).roundToInt())
+                        val dragged = draggedBottomIndex
+                        if (dragged != null && tabWidthPx > 0) {
+                            (dragged + (bottomDragOffsetX / tabWidthPx).roundToInt())
                                 .coerceIn(0, bottomScreens.size - 1)
                         } else {
-                            draggedBottomIndex
+                            dragged
                         }
                     }
 
@@ -678,12 +682,13 @@ fun GestionGastosApp(
 
                     bottomScreens.forEachIndexed { index, screen ->
                         val isSelected = currentViewingRoute == screen.route
-                        val isDragging = draggedBottomIndex == index
+                        val draggedIndex = draggedBottomIndex
+                        val isDragging = draggedIndex == index
 
                         val targetShiftX = when {
                             isDragging -> 0f
-                            draggedBottomIndex != null && targetIndex != null -> {
-                                val from = draggedBottomIndex!!
+                            draggedIndex != null && targetIndex != null -> {
+                                val from = draggedIndex
                                 val to = targetIndex
                                 if (from < to && index in (from + 1)..to) {
                                     -tabWidthPx
@@ -849,6 +854,7 @@ fun GestionGastosApp(
                         monthlyExpenses = monthlyExpenses,
                         paidCardIds = paidCardIds,
                         usdRate = usdRate,
+                        isUsdRateOutdated = isUsdRateOutdated,
                         isPrivacyMode = isPrivacyModeEnabled,
                         isAllPaid = isAllPaid,
                         onNavigateToScreen = navigateToScreen,
@@ -1049,7 +1055,8 @@ fun GestionGastosApp(
         }
     }
 
-    if (showBackupResultDialog && backupStatusMessage != null) {
+    val backupMessage = backupStatusMessage
+    if (showBackupResultDialog && backupMessage != null) {
         AlertDialog(
             onDismissRequest = { showBackupResultDialog = false },
             title = {
@@ -1065,7 +1072,7 @@ fun GestionGastosApp(
             },
             text = {
                 Text(
-                    text = backupStatusMessage!!,
+                    text = backupMessage,
                     style = MaterialTheme.typography.bodyMedium
                 )
             },

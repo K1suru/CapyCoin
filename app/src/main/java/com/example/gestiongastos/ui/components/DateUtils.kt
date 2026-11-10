@@ -1,7 +1,6 @@
 package com.example.gestiongastos.ui.components
 
-import java.time.Instant
-import java.time.LocalDate
+import com.example.gestiongastos.data.repository.localDateOf
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
@@ -18,11 +17,7 @@ fun calculateSaveDateForMonth(targetYearMonth: YearMonth, existingDate: Long? = 
         return existingDate
     }
     val now = System.currentTimeMillis()
-    val nowLocalDate = try {
-        Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate()
-    } catch (e: Exception) {
-        LocalDate.now()
-    }
+    val nowLocalDate = localDateOf(now)
     val nowYm = YearMonth.from(nowLocalDate)
     return if (targetYearMonth == nowYm) {
         now
@@ -35,3 +30,11 @@ fun calculateSaveDateForMonth(targetYearMonth: YearMonth, existingDate: Long? = 
             .toEpochMilli()
     }
 }
+
+/** Fecha larga para los formularios: "9 de noviembre de 2026" / "November 9, 2026". */
+fun longDateFormat(): java.text.SimpleDateFormat =
+    java.text.SimpleDateFormat(com.example.gestiongastos.i18n.tr("dd 'de' MMMM 'de' yyyy", "MMMM d, yyyy"), com.example.gestiongastos.i18n.appLocale())
+
+/** Fecha corta para las listas: "09 nov 2026" / "Nov 9, 2026". */
+fun shortDateFormat(): java.text.SimpleDateFormat =
+    java.text.SimpleDateFormat(com.example.gestiongastos.i18n.tr("dd MMM yyyy", "MMM d, yyyy"), com.example.gestiongastos.i18n.appLocale())

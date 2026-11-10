@@ -1,5 +1,8 @@
 package com.example.gestiongastos.ui.components
 
+import com.example.gestiongastos.data.repository.localDateOf
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import com.example.gestiongastos.i18n.tr
 import android.os.Build
 import androidx.compose.animation.core.Animatable
@@ -112,18 +115,43 @@ fun FormSheet(
 
 private const val MAX_AMOUNT_DIGITS = 13
 
-/** Limpia lo que escribe o pega el usuario: dígitos y, si se permite, una coma con 2 decimales. */
-fun sanitizeAmountInput(input: String, allowDecimals: Boolean): String {
-    val separators = input.count { it == '.' || it == ',' }
-    val lastSep = input.indexOfLast { it == '.' || it == ',' }
-    val decimalsAfterLast = if (lastSep >= 0) input.substring(lastSep + 1).count { it.isDigit() } else 0
-    // Un solo separador seguido de 0-2 dígitos = decimal; si no, eran separadores de miles
-    val hasDecimal = allowDecimals && separators == 1 && decimalsAfterLast <= 2
-    val intPart = (if (hasDecimal) input.substring(0, lastSep) else input).filter { it.isDigit() }
-        .trimStart('0').take(MAX_AMOUNT_DIGITS)
-    if (!hasDecimal) return intPart
-    val decimals = input.substring(lastSep + 1).filter { it.isDigit() }.take(2)
-    return (intPart.ifEmpty { "0" }) + "," + decimals
+/** true si [input] es [previous] con un solo carácter de más o de menos: una tecla, no un pegado. */
+private fun isSingleKeystroke(previous: String, input: String): Boolean {
+    val (short, long) = if (input.length < previous.length) input to previous else previous to input
+    if (long.length - short.length != 1) return false
+    val prefix = short.indices.firstOrNull { short[it] != long[it] } ?: short.length
+    return short.substring(prefix) == long.substring(prefix + 1)
+}
+
+/**
+ * Limpia lo que escribe o pega el usuario y lo deja en el formato interno del campo:
+ * solo dígitos y, si [allowDecimals], una coma con hasta 2 decimales.
+ *
+ * [previous] es lo que había en el campo. Sirve para distinguir una tecla de un pegado:
+ * - Una tecla: el separador que se escribe es el decimal. En pesos se ignora; en dólares un tercer
+ *   decimal o un segundo separador se ignoran (antes "25,50" + "0" quedaba en 25500).
+ * - Un pegado se lee con las reglas de [parseAmount] ("1.500" = 1500, "1.50" = 1,5, "1.500,50" = 1500,5).
+ *   En pesos los decimales se redondean ("1.50" = 2; antes quedaba 150). Si el texto es ambiguo
+ *   o inválido ("1234.567", "1.5.0") no se adivina: el campo queda como estaba.
+ */
+fun sanitizeAmountInput(input: String, allowDecimals: Boolean, previous: String = ""): String {
+    // Compose vuelve a entregar el mismo texto cuando se ignoró una tecla: no hay nada que limpiar.
+    // (Sin esto se leía como un pegado y "25,50" quedaba en "25,5", o "0," se borraba.)
+    if (input == previous) return previous
+    val text = input.filter { it.isDigit() || it == '.' || it == ',' }
+    fun digits(part: String) = part.filter { it.isDigit() }.trimStart('0').take(MAX_AMOUNT_DIGITS)
+    val separators = text.count { !it.isDigit() }
+    if (separators == 0) return digits(text)
+
+    if (isSingleKeystroke(previous, input)) {
+        if (!allowDecimals) return digits(text)
+        if (separators > 1) return previous
+        val sep = text.indexOfFirst { !it.isDigit() }
+        return digits(text.substring(0, sep)).ifEmpty { "0" } + "," + text.substring(sep + 1).take(2)
+    }
+
+    val amount = parseAmount(text) ?: return previous
+    return amountToInput(amount, allowDecimals)
 }
 
 /** Convierte un monto guardado al formato interno del campo (para editar). */
@@ -135,6 +163,15 @@ fun amountToInput(amount: Double?, allowDecimals: Boolean = false): String {
     } else {
         Math.round(amount).toString()
     }
+}
+
+/**
+ * Suma [increment] al monto escrito en un campo y lo devuelve en el formato interno del campo.
+ * Conserva los decimales cuando la moneda los permite ("12,5" + 5 = "17,5") y no pasa de [MAX_AMOUNT].
+ */
+fun addToAmountInput(current: String, increment: Int, allowDecimals: Boolean): String {
+    val sum = ((parseAmount(current) ?: 0.0) + increment).coerceIn(0.0, MAX_AMOUNT)
+    return amountToInput(sum, allowDecimals)
 }
 
 private class AmountVisualTransformation(private val prefix: String) : VisualTransformation {
@@ -183,9 +220,24 @@ fun AmountTextField(
 ) {
     val allowDecimals = currency == "USD"
     val prefix = if (currency == "USD") "US$ " else "$ "
+    // El texto siempre es [value]; aquí solo se recuerda el cursor. Si al limpiar cambia lo que se escribió
+    // ("," pasa a "0,") el cursor va al final: antes quedaba antes de la coma y el siguiente dígito caía en los enteros.
+    var selection by remember { mutableStateOf(TextRange(value.length)) }
+    val fieldValue = TextFieldValue(
+        text = value,
+        selection = TextRange(selection.start.coerceIn(0, value.length), selection.end.coerceIn(0, value.length))
+    )
     OutlinedTextField(
-        value = value,
-        onValueChange = { onValueChange(sanitizeAmountInput(it, allowDecimals)) },
+        value = fieldValue,
+        onValueChange = { typed ->
+            if (typed.text == value) {
+                selection = typed.selection // solo se movió el cursor
+            } else {
+                val clean = sanitizeAmountInput(typed.text, allowDecimals, previous = value)
+                selection = if (clean == typed.text) typed.selection else TextRange(clean.length)
+                onValueChange(clean)
+            }
+        },
         label = { Text(label) },
         placeholder = placeholder?.let { { Text(it) } },
         supportingText = supportingText,
@@ -254,7 +306,7 @@ fun rememberDatePicker(selectedMillis: Long, onDatePicked: (Long) -> Unit): Date
     val launcher = remember { DatePickerLauncher() }
     if (launcher.isVisible) {
         // El DatePicker trabaja en UTC: se convierte la fecha local a medianoche UTC y de vuelta
-        val localDate = Instant.ofEpochMilli(selectedMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+        val localDate = localDateOf(selectedMillis)
         val state = rememberDatePickerState(
             initialSelectedDateMillis = localDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
         )

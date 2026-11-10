@@ -5,7 +5,6 @@ import com.example.gestiongastos.i18n.appLocale
 import com.example.gestiongastos.ui.components.rememberAnimatedAmount
 import com.example.gestiongastos.ui.components.privateText
 import com.example.gestiongastos.ui.components.capyPattern
-import com.example.gestiongastos.ui.components.privacyBlur
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,26 +29,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Savings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import com.example.gestiongastos.ui.components.AutoResizedText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -61,22 +50,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.gestiongastos.data.local.SavingsEntity
-import com.example.gestiongastos.ui.components.calculateSaveDateForMonth
 import com.example.gestiongastos.ui.components.formatCurrency
 import com.example.gestiongastos.ui.components.AddEditSavingsDialog
 import com.example.gestiongastos.ui.components.ConfirmDeleteDialog
 import com.example.gestiongastos.ui.components.SavingsItemCard
 import com.example.gestiongastos.data.model.ItemKeys
-import java.text.SimpleDateFormat
-import java.time.LocalTime
 import java.time.YearMonth
-import java.time.ZoneId
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun SavingsScreen(

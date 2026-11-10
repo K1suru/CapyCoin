@@ -59,9 +59,6 @@ object FinanceColors {
     fun goldText(isDark: Boolean): Color = if (isDark) Color(0xFFFFD54F) else Color(0xFFB0661A)
     fun goldAccent(isDark: Boolean): Color = if (isDark) Color(0xFFFFE082) else Color(0xFFE8961E)
 
-    // Superficies neutras
-    fun cardSurface(isDark: Boolean): Color = if (isDark) Color(0xFF1E1C1A) else Color(0xFFF7F5F2)
-
     /** Texto/ícono sobre un botón relleno con un color *Accent (claro en modo oscuro). */
     fun onAccent(isDark: Boolean): Color = if (isDark) Color(0xFF241810) else Color.White
 }

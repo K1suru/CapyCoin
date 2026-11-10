@@ -1,5 +1,10 @@
 package com.example.gestiongastos.ui.screens
 
+import com.example.gestiongastos.ui.components.shortDateFormat
+import com.example.gestiongastos.ui.components.formatUsdWithCop
+import com.example.gestiongastos.data.model.toCents
+import com.example.gestiongastos.data.model.incomeInstallmentNumber
+import com.example.gestiongastos.data.model.markedFirst
 import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.i18n.appLocale
 import com.example.gestiongastos.ui.components.rememberAnimatedAmount
@@ -82,7 +87,6 @@ import com.example.gestiongastos.data.local.ExpenseEntity
 import com.example.gestiongastos.data.local.IncomeEntity
 import com.example.gestiongastos.data.model.CardMonthSummary
 import com.example.gestiongastos.ui.components.formatCurrency
-import com.example.gestiongastos.ui.components.formatUsd
 import com.example.gestiongastos.ui.components.ConfirmDeleteDialog
 import com.example.gestiongastos.ui.components.PawCheckButton
 import com.example.gestiongastos.ui.components.AmountTextField
@@ -94,13 +98,10 @@ import com.example.gestiongastos.ui.components.parseAmount
 import com.example.gestiongastos.ui.components.calculateSaveDateForMonth
 import com.example.gestiongastos.ui.components.MonthYearPickerDialog
 import java.text.SimpleDateFormat
-import java.time.Instant
-import java.time.LocalTime
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Date
-import java.util.Locale
 
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
@@ -142,11 +143,7 @@ fun IncomeScreen(
 
     val totalIncomeMonth = remember(incomes) { incomes.sumOf { it.amount } }
     val sortedIncomes = remember(incomes, receivedIncomeIds, movePaidToTop) {
-        if (movePaidToTop) {
-            incomes.sortedWith(compareByDescending { it.id in receivedIncomeIds })
-        } else {
-            incomes
-        }
+        markedFirst(incomes, movePaidToTop) { it.id in receivedIncomeIds }
     }
 
     Scaffold(
@@ -317,9 +314,9 @@ fun IncomeScreen(
         )
     }
 
-    if (incomeToEdit != null) {
+    incomeToEdit?.let { editing ->
         AddEditIncomeDialog(
-            incomeToEdit = incomeToEdit,
+            incomeToEdit = editing,
             expenses = expenses,
             cardSummaries = cardSummaries,
             usdRate = usdRate,
@@ -327,17 +324,17 @@ fun IncomeScreen(
             onDismiss = { incomeToEdit = null },
             onSave = { concept, amount, dateMillis, isRecurring, linkedExpenseIdsText, linkedCardPurchaseIdsText, extraAmount, extraConcept, totalInstallments, totalAmount, endDateMillis ->
                 onUpdateIncome(
-                    incomeToEdit!!.copy(
+                    editing.copy(
                         concept = concept,
-                        amount = amount,
+                        amountCents = toCents(amount),
                         date = dateMillis,
                         isRecurring = isRecurring,
                         linkedExpenseIdsText = linkedExpenseIdsText,
                         linkedCardPurchaseIdsText = linkedCardPurchaseIdsText,
-                        extraAmount = extraAmount,
+                        extraAmountCents = toCents(extraAmount),
                         extraConcept = extraConcept,
                         totalInstallments = totalInstallments,
-                        totalAmount = totalAmount,
+                        totalAmountCents = toCents(totalAmount),
                         endDateMillis = endDateMillis
                     )
                 )
@@ -356,9 +353,9 @@ fun IncomeScreen(
         )
     }
 
-    if (viewingReimbursement != null) {
+    viewingReimbursement?.let { reimbursement ->
         ReimbursementDetailDialog(
-            income = viewingReimbursement!!,
+            income = reimbursement,
             expenses = expenses,
             cardSummaries = cardSummaries,
             usdRate = usdRate,
@@ -380,27 +377,18 @@ fun IncomeItemCard(
     onDelete: () -> Unit,
     onShowReimbursementDetail: () -> Unit = {}
 ) {
-    val dateFormat = SimpleDateFormat(tr("dd MMM yyyy", "MMM d, yyyy"), appLocale())
+    val dateFormat = shortDateFormat()
     val formattedDate = dateFormat.format(Date(income.date))
     val isReimbursement = !income.linkedExpenseIdsText.isNullOrBlank() || !income.linkedCardPurchaseIdsText.isNullOrBlank() || income.extraAmount > 0
     val isDark = isAppDark()
     val haptic = LocalHapticFeedback.current
     var showMenu by remember { mutableStateOf(false) }
 
-    val diffMonths = if (income.totalInstallments > 1) {
-        val entryDate = try {
-            Instant.ofEpochMilli(income.date).atZone(ZoneId.systemDefault()).toLocalDate()
-        } catch (e: Exception) {
-            java.time.LocalDate.now()
-        }
-        val entryYearMonth = YearMonth.from(entryDate)
-        (targetYearMonth.year - entryYearMonth.year) * 12 + (targetYearMonth.monthValue - entryYearMonth.monthValue)
-    } else 0
-    val currentInstallment = (diffMonths + 1).coerceIn(1, income.totalInstallments)
+    val currentInstallment = incomeInstallmentNumber(income, targetYearMonth)
 
     val endYearMonth = if (income.isRecurring && income.endDateMillis != null) {
         try {
-            YearMonth.from(Instant.ofEpochMilli(income.endDateMillis).atZone(ZoneId.systemDefault()).toLocalDate())
+            yearMonthOf(income.endDateMillis)
         } catch (e: Exception) {
             null
         }
@@ -767,7 +755,7 @@ fun AddEditIncomeDialog(
         mutableStateOf(
             incomeToEdit?.endDateMillis?.let {
                 try {
-                    YearMonth.from(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate())
+                    yearMonthOf(it)
                 } catch (e: Exception) {
                     defaultYearMonth.plusMonths(3)
                 }
@@ -1217,9 +1205,9 @@ fun AddEditIncomeDialog(
                     }
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1431,7 +1419,7 @@ fun AddEditIncomeDialog(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(exp.concept, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                                             Text(
-                                                text = if (exp.currency == "USD") "${formatUsd(exp.amount)} (~${formatCurrency(exp.amount * usdRate)})" else formatCurrency(exp.amount),
+                                                text = if (exp.currency == "USD") formatUsdWithCop(exp.amount, usdRate) else formatCurrency(exp.amount),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1826,7 +1814,7 @@ fun ReimbursementDetailDialog(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (!income.extraConcept.isNullOrBlank()) income.extraConcept!! else tr("Monto adicional", "Additional amount"),
+                                        text = if (!income.extraConcept.isNullOrBlank()) income.extraConcept.orEmpty() else tr("Monto adicional", "Additional amount"),
                                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )

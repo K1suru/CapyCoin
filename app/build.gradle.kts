@@ -27,8 +27,8 @@ android {
         minSdk = 24
         targetSdk = 35
         // versionCode solo puede subir (Android no deja instalar una versión menor encima)
-        versionCode = 6
-        versionName = "1.2"
+        versionCode = 9
+        versionName = "1.3.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -77,8 +77,21 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+    // El test de migración lee los esquemas exportados (app/schemas). Robolectric toma los assets de la
+    // variante debug, así que van ahí: solo entran en el APK de depuración, nunca en el de release.
+    sourceSets.getByName("debug").assets.srcDir("$projectDir/schemas")
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+// Room deja aquí el esquema de cada versión de la base (app/schemas/.../23.json), para tests de migración
+kapt {
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
     }
 }
 
@@ -103,6 +116,10 @@ dependencies {
     kapt(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
+    // Solo para el test de migración de la base (Room real sobre SQLite, sin teléfono)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.androidx.test.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -1,5 +1,6 @@
 package com.example.gestiongastos.ui.screens
 
+import com.example.gestiongastos.data.repository.yearMonthOf
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -40,22 +41,17 @@ import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.ui.components.AmountTextField
 import com.example.gestiongastos.ui.components.FormSheet
 import com.example.gestiongastos.ui.components.amountToInput
-import com.example.gestiongastos.ui.components.formatCurrency
-import com.example.gestiongastos.ui.components.formatUsd
+import com.example.gestiongastos.ui.components.formatMoney
 import com.example.gestiongastos.ui.components.parseAmount
+import com.example.gestiongastos.data.model.ExtraPaymentCheck
+import com.example.gestiongastos.data.model.checkExtraPayment
 import com.example.gestiongastos.ui.components.privacyBlur
 import com.example.gestiongastos.ui.components.privateText
 import com.example.gestiongastos.ui.theme.FinanceColors
 import com.example.gestiongastos.ui.theme.isAppDark
-import java.time.Instant
-import java.time.YearMonth
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 const val MAX_EXPENSE_INSTALLMENTS = 360
-
-private fun formatMoney(amount: Double, currency: String) =
-    if (currency == "USD") formatUsd(amount) else formatCurrency(amount)
 
 /** Valida el número de cuotas escrito: null si no es válido. */
 fun parseExpenseInstallments(text: String): Int? =
@@ -109,7 +105,7 @@ fun ExpenseInstallmentsFields(
 
     val count = parseExpenseInstallments(countText)
     if (count != null && installmentAmount > 0) {
-        val start = YearMonth.from(Instant.ofEpochMilli(startDateMillis).atZone(ZoneId.systemDefault()).toLocalDate())
+        val start = yearMonthOf(startDateMillis)
         val monthFormat = DateTimeFormatter.ofPattern("MMM yyyy", appLocale())
         val range = "${start.format(monthFormat)} → ${start.plusMonths(count - 1L).format(monthFormat)}"
         Surface(
@@ -265,17 +261,17 @@ fun ExpensePaymentDialog(
                     }
                 }
 
-                if (errorMessage != null) {
-                    Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                errorMessage?.let { errorText ->
+                    Text(text = errorText, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
         confirmButton = {
             Button(onClick = {
-                when {
-                    parsedAmount <= 0 -> errorMessage = tr("Ingresa un monto de abono mayor a 0", "Enter a payment greater than 0")
-                    parsedAmount > balance + 0.01 -> errorMessage = tr("El abono no puede ser mayor al saldo de ${formatMoney(balance, currency)}", "The payment can't be more than the balance of ${formatMoney(balance, currency)}")
-                    else -> onSave(parsedAmount.coerceAtMost(balance))
+                when (val check = checkExtraPayment(parsedAmount, balance, currency)) {
+                    ExtraPaymentCheck.NotPositive -> errorMessage = tr("Ingresa un monto de abono mayor a 0", "Enter a payment greater than 0")
+                    ExtraPaymentCheck.ExceedsBalance -> errorMessage = tr("El abono no puede ser mayor al saldo de ${formatMoney(balance, currency)}", "The payment can't be more than the balance of ${formatMoney(balance, currency)}")
+                    is ExtraPaymentCheck.Valid -> onSave(check.amount)
                 }
             }) { Text(tr("Guardar Abono", "Save payment")) }
         },

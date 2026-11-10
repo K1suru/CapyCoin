@@ -34,9 +34,6 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses ORDER BY date DESC")
     fun getAllExpenses(): Flow<List<ExpenseEntity>>
 
-    @Query("SELECT * FROM expenses ORDER BY date DESC")
-    suspend fun getAllExpensesList(): List<ExpenseEntity>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpense(expense: ExpenseEntity): Long
 
@@ -76,9 +73,6 @@ interface CreditCardDao {
     @Query("SELECT * FROM credit_cards ORDER BY id ASC")
     fun getAllCreditCards(): Flow<List<CreditCardEntity>>
 
-    @Query("SELECT * FROM credit_cards ORDER BY id ASC")
-    suspend fun getCreditCardsList(): List<CreditCardEntity>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCreditCard(card: CreditCardEntity): Long
 
@@ -101,9 +95,6 @@ interface CardPurchaseDao {
     fun getAllCardPurchases(): Flow<List<CardPurchaseEntity>>
 
     @Query("SELECT * FROM card_purchases WHERE cardId = :cardId ORDER BY purchaseDate DESC")
-    fun getPurchasesByCard(cardId: Long): Flow<List<CardPurchaseEntity>>
-
-    @Query("SELECT * FROM card_purchases WHERE cardId = :cardId ORDER BY purchaseDate DESC")
     suspend fun getPurchasesByCardList(cardId: Long): List<CardPurchaseEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -123,6 +114,19 @@ interface CardPurchaseDao {
 
     @Query("DELETE FROM card_purchases")
     suspend fun clearAllCardPurchases()
+
+    // Limpieza de datos huérfanos (ver FinanceRepository.deleteOrphanedCardData)
+    @Query("DELETE FROM card_purchases WHERE cardId NOT IN (SELECT id FROM credit_cards)")
+    suspend fun deletePurchasesWithoutCard(): Int
+
+    @Query("DELETE FROM card_purchase_payments WHERE purchaseId NOT IN (SELECT id FROM card_purchases)")
+    suspend fun deletePaymentsWithoutPurchase(): Int
+
+    @Query("DELETE FROM omitted_installments WHERE purchaseId NOT IN (SELECT id FROM card_purchases)")
+    suspend fun deleteOmittedWithoutPurchase(): Int
+
+    @Query("DELETE FROM settled_purchases WHERE purchaseId NOT IN (SELECT id FROM card_purchases)")
+    suspend fun deleteSettledWithoutPurchase(): Int
 }
 
 @Dao
@@ -156,9 +160,6 @@ interface OmittedInstallmentDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllOmittedInstallments(items: List<OmittedInstallmentEntity>)
-
-    @Query("DELETE FROM omitted_installments WHERE purchaseId = :purchaseId AND yearMonthText = :yearMonthText")
-    suspend fun deleteOmittedInstallment(purchaseId: Long, yearMonthText: String)
 
     @Query("DELETE FROM omitted_installments WHERE purchaseId = :purchaseId")
     suspend fun deleteOmittedForPurchase(purchaseId: Long)
@@ -197,7 +198,7 @@ interface IgnoredExpenseDao {
     suspend fun insertAllIgnoredExpenses(items: List<IgnoredExpenseEntity>)
 
     @Query("DELETE FROM ignored_expenses WHERE itemKey = :itemKey AND yearMonthText = :yearMonthText")
-    suspend fun deleteIgnoredExpense(itemKey: String, yearMonthText: String)
+    suspend fun deleteIgnoredExpense(itemKey: String, yearMonthText: String): Int
 
     @Query("DELETE FROM ignored_expenses WHERE itemKey = :itemKey")
     suspend fun deleteAllForItem(itemKey: String)
@@ -218,7 +219,7 @@ interface PaidCreditCardDao {
     suspend fun insertAllPaidCreditCards(items: List<PaidCreditCardEntity>)
 
     @Query("DELETE FROM paid_credit_cards WHERE cardId = :cardId AND yearMonthText = :yearMonthText")
-    suspend fun deletePaidCreditCard(cardId: Long, yearMonthText: String)
+    suspend fun deletePaidCreditCard(cardId: Long, yearMonthText: String): Int
 
     @Query("DELETE FROM paid_credit_cards WHERE cardId = :cardId")
     suspend fun deleteAllForCard(cardId: Long)
@@ -239,7 +240,7 @@ interface PaidExpenseDao {
     suspend fun insertAllPaidExpenses(items: List<PaidExpenseEntity>)
 
     @Query("DELETE FROM paid_expenses WHERE itemKey = :itemKey AND yearMonthText = :yearMonthText")
-    suspend fun deletePaidExpense(itemKey: String, yearMonthText: String)
+    suspend fun deletePaidExpense(itemKey: String, yearMonthText: String): Int
 
     @Query("DELETE FROM paid_expenses WHERE itemKey = :itemKey")
     suspend fun deleteAllForItem(itemKey: String)
@@ -259,8 +260,8 @@ interface SettledPurchaseDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllSettledPurchases(items: List<SettledPurchaseEntity>)
 
-    @Query("DELETE FROM settled_purchases WHERE purchaseId = :purchaseId AND yearMonthText = :yearMonthText")
-    suspend fun deleteSettledPurchase(purchaseId: Long, yearMonthText: String)
+    @Query("SELECT * FROM settled_purchases WHERE purchaseId = :purchaseId")
+    suspend fun getSettledForPurchase(purchaseId: Long): List<SettledPurchaseEntity>
 
     @Query("DELETE FROM settled_purchases WHERE purchaseId = :purchaseId")
     suspend fun deleteSettledPurchasesForPurchase(purchaseId: Long)
@@ -274,9 +275,6 @@ interface ReceivedIncomeDao {
     @Query("SELECT * FROM received_incomes")
     fun getAllReceivedIncomes(): Flow<List<ReceivedIncomeEntity>>
 
-    @Query("SELECT * FROM received_incomes")
-    suspend fun getReceivedIncomesList(): List<ReceivedIncomeEntity>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReceivedIncome(item: ReceivedIncomeEntity): Long
 
@@ -284,7 +282,7 @@ interface ReceivedIncomeDao {
     suspend fun insertAllReceivedIncomes(items: List<ReceivedIncomeEntity>)
 
     @Query("DELETE FROM received_incomes WHERE incomeId = :incomeId AND yearMonthText = :yearMonthText")
-    suspend fun deleteReceivedIncome(incomeId: Long, yearMonthText: String)
+    suspend fun deleteReceivedIncome(incomeId: Long, yearMonthText: String): Int
 
     @Query("DELETE FROM received_incomes WHERE incomeId = :incomeId")
     suspend fun deleteAllForIncome(incomeId: Long)

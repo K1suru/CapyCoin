@@ -9,6 +9,17 @@ import java.net.URL
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
+/** Rango en el que una TRM (pesos por dólar) es creíble; fuera de él se descarta la respuesta. */
+val PLAUSIBLE_USD_RATE = 500.0..50_000.0
+
+/**
+ * Lee el valor de la TRM que devuelve la API ("4150.25" o "4150,25").
+ * Devuelve null si no es un número finito dentro de [PLAUSIBLE_USD_RATE]: una tasa NaN, 0 o disparatada
+ * dañaría todos los montos en dólares.
+ */
+fun parseTrmValue(text: String): Double? =
+    text.trim().replace(",", ".").toDoubleOrNull()?.takeIf { it.isFinite() && it in PLAUSIBLE_USD_RATE }
+
 object ExchangeRateService {
     private const val TAG = "ExchangeRateService"
 
@@ -27,7 +38,8 @@ object ExchangeRateService {
     /**
      * Returns the current TRM (Tasa Representativa del Mercado) USD → COP from Banco de la República.
      * - Fetches once per calendar day; subsequent calls return the cached value.
-     * - Returns null if it cannot be fetched (sin conexión o respuesta inválida); el llamador decide el respaldo.
+     * - Devuelve null si hoy no se pudo obtener (sin conexión o respuesta inválida). Ya no devuelve en
+     *   silencio la tasa de un día anterior: el llamador conserva la última conocida y sabe que no es la de hoy.
      */
     suspend fun getUsdToCopRate(): Double? = withContext(Dispatchers.IO) {
         val today = LocalDate.now()
@@ -45,25 +57,27 @@ object ExchangeRateService {
             }
             if (connection.responseCode !in 200..299) {
                 Log.w(TAG, "TRM API HTTP ${connection.responseCode}")
-                return@withContext cached
+                return@withContext null
             }
             val raw = connection.inputStream.bufferedReader().use { it.readText() }
             val jsonArray = JSONArray(raw)
             if (jsonArray.length() > 0) {
                 val entry = jsonArray.getJSONObject(0)
-                val rate = entry.getString("valor").replace(",", ".").toDouble()
-                if (rate <= 0.0) return@withContext cached
+                val rate = parseTrmValue(entry.getString("valor")) ?: run {
+                    Log.w(TAG, "TRM API returned an invalid rate")
+                    return@withContext null
+                }
                 cachedDate = today
                 cachedRate = rate
                 Log.d(TAG, "TRM Banco de la República: $$rate COP/USD (vigencia: ${entry.optString("vigenciadesde", "?")})")
                 rate
             } else {
                 Log.w(TAG, "TRM API returned empty array")
-                cached
+                null
             }
         } catch (e: Exception) {
             Log.w(TAG, "Could not fetch TRM", e)
-            cached
+            null
         } finally {
             connection?.disconnect()
         }

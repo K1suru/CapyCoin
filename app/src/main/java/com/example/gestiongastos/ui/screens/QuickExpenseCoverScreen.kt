@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Pets
-import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -77,7 +76,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,6 +85,7 @@ import com.example.gestiongastos.data.local.CreditCardEntity
 import com.example.gestiongastos.data.local.ExpenseEntity
 import com.example.gestiongastos.ui.components.formatCurrency
 import com.example.gestiongastos.ui.components.parseAmount
+import com.example.gestiongastos.ui.components.addToAmountInput
 import com.example.gestiongastos.ui.components.formatUsd
 import com.example.gestiongastos.ui.components.AmountTextField
 import com.example.gestiongastos.ui.components.calculateSaveDateForMonth
@@ -96,7 +95,6 @@ import com.example.gestiongastos.ui.viewmodel.SummaryUiState
 import kotlinx.coroutines.delay
 import java.time.YearMonth
 import java.time.format.TextStyle
-import java.util.Locale
 
 @Composable
 fun QuickExpenseCoverScreen(
@@ -788,9 +786,7 @@ fun QuickExpenseCoverScreen(
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    val cur = parseAmount(amountText) ?: 0.0
-                                    val newAmount = (cur + inc).toLong()
-                                    amountText = newAmount.toString()
+                                    amountText = addToAmountInput(amountText, inc, allowDecimals = currency == "USD")
                                     errorMessage = null
                                 }
                         ) {
@@ -837,7 +833,7 @@ fun QuickExpenseCoverScreen(
                         amountText = it
                         errorMessage = null
                     },
-                    label = "Monto exacto",
+                    label = tr("Monto exacto", "Exact amount"),
                     currency = currency
                 )
 
@@ -990,10 +986,10 @@ fun QuickExpenseCoverScreen(
                     }
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = FinanceColors.expenseText(isDark),
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         modifier = Modifier.fillMaxWidth(),

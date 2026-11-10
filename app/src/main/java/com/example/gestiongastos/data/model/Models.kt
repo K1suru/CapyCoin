@@ -1,8 +1,7 @@
 package com.example.gestiongastos.data.model
 
+import com.example.gestiongastos.data.repository.localDateOf
 import com.example.gestiongastos.i18n.tr
-import java.time.Instant
-import java.time.ZoneId
 import java.time.YearMonth
 
 enum class InstallmentStatusType {
@@ -65,10 +64,6 @@ data class PurchaseInstallmentDetail(
 
     fun remainingBalanceToPayInCop(usdRate: Double = DEFAULT_USD_RATE): Double {
         return if (currency == "USD") remainingBalanceToPay * usdRate else remainingBalanceToPay
-    }
-
-    fun totalAmountInCop(usdRate: Double = DEFAULT_USD_RATE): Double {
-        return if (currency == "USD") totalAmount * usdRate else totalAmount
     }
 }
 
@@ -147,7 +142,7 @@ fun installmentSchedule(
     val result = mutableListOf<Double>()
     for (i in 1..n) {
         val rate = if (isFirstInstallmentInterestFree && i == 1) 0.0 else baseRate
-        val cuota = frenchPayment(balance, rate, n - i + 1)
+        val cuota = installmentInCents(balance, rate, n - i + 1, isLast = i == n)
         result.add(cuota)
         balance = (balance * (1.0 + rate) - cuota).coerceAtLeast(0.0)
     }
@@ -172,13 +167,7 @@ fun calculatePurchaseInstallmentDetail(
     currency: String = "COP",
     settledYearMonth: YearMonth? = null
 ): PurchaseInstallmentDetail {
-    val purchaseLocalDate = try {
-        Instant.ofEpochMilli(purchaseDateMillis)
-            .atZone(ZoneId.systemDefault())
-            .toLocalDate()
-    } catch (e: Exception) {
-        java.time.LocalDate.now()
-    }
+    val purchaseLocalDate = localDateOf(purchaseDateMillis)
     val baseYearMonth = YearMonth.from(purchaseLocalDate)
 
     // 1. Determine which billing cycle (cutoff month) this purchase belongs to:
@@ -228,13 +217,13 @@ fun calculatePurchaseInstallmentDetail(
         isAfterSettlement -> {
             Triple(
                 InstallmentStatusType.FINISHED,
-                tr("Liquidado en ${settledYearMonth!!.monthValue}/${settledYearMonth.year}", "Paid off in ${settledYearMonth!!.monthValue}/${settledYearMonth.year}"),
+                tr("Liquidado en ${settledYearMonth.monthValue}/${settledYearMonth.year}", "Paid off in ${settledYearMonth.monthValue}/${settledYearMonth.year}"),
                 0.0
             )
         }
         isRecurring -> {
             // Cobro mensual fijo; un abono solo reduce el cobro del mes en que se hizo
-            val baseCharge = frenchPayment(totalAmount, baseRate, n)
+            val baseCharge = roundToCents(frenchPayment(totalAmount, baseRate, n))
             val paidThisMonth = payments.filter { it.yearMonth == targetYearMonth }.sumOf { it.amount }
             val charge = (baseCharge - paidThisMonth).coerceAtLeast(0.0)
             remainingBalance = charge
@@ -276,7 +265,7 @@ fun calculatePurchaseInstallmentDetail(
                     break
                 }
                 val rate = rateFor(i)
-                cuota = frenchPayment(balance, rate, n - i + 1)
+                cuota = installmentInCents(balance, rate, n - i + 1, isLast = i == n)
                 if (i < currentInstallment) {
                     balance = (balance * (1.0 + rate) - cuota).coerceAtLeast(0.0)
                 }

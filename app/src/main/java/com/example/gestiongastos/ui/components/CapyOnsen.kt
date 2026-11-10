@@ -78,14 +78,6 @@ fun capyMoodFor(spentFraction: Float): CapyMood = when {
     else -> CapyMood.RELAXED
 }
 
-/** Color del agua: tibia y tranquila al inicio, cada vez más caliente al acercarse al límite. */
-fun onsenWaterColor(mood: CapyMood, isDark: Boolean): Color = when (mood) {
-    CapyMood.RELAXED -> if (isDark) Color(0xFF3E7F77) else Color(0xFF9CD5C9)
-    CapyMood.CAUTIOUS -> if (isDark) Color(0xFFB98A3E) else Color(0xFFF4C27A)
-    CapyMood.WORRIED -> if (isDark) Color(0xFFC27436) else Color(0xFFEE9B4F)
-    CapyMood.PANIC -> if (isDark) Color(0xFFB4533A) else Color(0xFFD9663F)
-}
-
 /**
  * Aro de progreso con la ilustración del capibara en el onsen según el % de ingresos usado.
  */

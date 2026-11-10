@@ -1,5 +1,6 @@
 package com.example.gestiongastos.data.repository
 
+import com.example.gestiongastos.data.model.toCents
 import com.example.gestiongastos.data.model.calculateExpenseInstallment
 import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.data.local.ExpensePaymentEntity
@@ -16,29 +17,38 @@ import com.example.gestiongastos.data.model.InstallmentStatusType
 import com.example.gestiongastos.data.model.DEFAULT_USD_RATE
 import com.example.gestiongastos.data.model.PurchasePayment
 import com.example.gestiongastos.data.model.calculatePurchaseInstallmentDetail
+import com.example.gestiongastos.data.model.incomeAppliesInMonth
 import com.example.gestiongastos.data.model.payableThisMonth
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.time.Instant
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 
+import com.example.gestiongastos.data.local.IgnoredExpenseDao
 import com.example.gestiongastos.data.local.IgnoredExpenseEntity
+import com.example.gestiongastos.data.local.PaidCreditCardDao
+import com.example.gestiongastos.data.local.PaidExpenseDao
+import com.example.gestiongastos.data.local.ReceivedIncomeDao
+import com.example.gestiongastos.data.local.SettledPurchaseDao
 import com.example.gestiongastos.data.local.PaidCreditCardEntity
 import com.example.gestiongastos.data.local.PaidExpenseEntity
 import com.example.gestiongastos.data.local.ReceivedIncomeEntity
 import com.example.gestiongastos.data.local.SettledPurchaseEntity
-import kotlinx.coroutines.flow.first
 import androidx.room.withTransaction
 import com.example.gestiongastos.data.model.ItemKeys
 
 /** Mes (zona local) de un timestamp en milisegundos. */
-fun yearMonthOf(millis: Long): YearMonth = try {
-    YearMonth.from(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate())
+/** Fecha local de un instante guardado en milisegundos (hoy si el valor no es una fecha válida). */
+fun localDateOf(millis: Long): LocalDate = try {
+    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
 } catch (e: Exception) {
-    YearMonth.now()
+    LocalDate.now()
 }
+
+fun yearMonthOf(millis: Long): YearMonth = YearMonth.from(localDateOf(millis))
 
 /** Un registro único aplica solo en su mes; uno recurrente desde su mes hasta [endDateMillis] (incluido). */
 fun isInMonth(target: YearMonth, start: YearMonth, isRecurring: Boolean, endDateMillis: Long?): Boolean {
@@ -50,6 +60,47 @@ fun isInMonth(target: YearMonth, start: YearMonth, isRecurring: Boolean, endDate
 /** Timestamp del último instante de [yearMonth], usado como fecha de fin de un recurrente. */
 fun endOfMonthMillis(yearMonth: YearMonth): Long =
     yearMonth.atEndOfMonth().atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+/** Marca o desmarca un ingreso como recibido en un mes. Devuelve true si quedó marcado. */
+internal suspend fun toggleReceivedIncome(dao: ReceivedIncomeDao, incomeId: Long, yearMonthText: String): Boolean {
+    if (dao.deleteReceivedIncome(incomeId, yearMonthText) > 0) return false
+    dao.insertReceivedIncome(ReceivedIncomeEntity(incomeId = incomeId, yearMonthText = yearMonthText))
+    return true
+}
+
+/** Marca o desmarca un ítem como ignorado en un mes. Devuelve true si quedó marcado. */
+internal suspend fun toggleIgnoredExpense(dao: IgnoredExpenseDao, itemKey: String, yearMonthText: String): Boolean {
+    if (dao.deleteIgnoredExpense(itemKey, yearMonthText) > 0) return false
+    dao.insertIgnoredExpense(IgnoredExpenseEntity(itemKey = itemKey, yearMonthText = yearMonthText))
+    return true
+}
+
+/** Marca o desmarca una tarjeta como pagada en un mes. Devuelve true si quedó marcada. */
+internal suspend fun togglePaidCreditCard(dao: PaidCreditCardDao, cardId: Long, yearMonthText: String): Boolean {
+    if (dao.deletePaidCreditCard(cardId, yearMonthText) > 0) return false
+    dao.insertPaidCreditCard(PaidCreditCardEntity(cardId = cardId, yearMonthText = yearMonthText))
+    return true
+}
+
+/** Marca o desmarca un ítem como pagado en un mes. Devuelve true si quedó marcado. */
+internal suspend fun togglePaidExpense(dao: PaidExpenseDao, itemKey: String, yearMonthText: String): Boolean {
+    if (dao.deletePaidExpense(itemKey, yearMonthText) > 0) return false
+    dao.insertPaidExpense(PaidExpenseEntity(itemKey = itemKey, yearMonthText = yearMonthText))
+    return true
+}
+
+/**
+ * Liquida una compra en [yearMonthText], o revierte la liquidación si ya estaba liquidada en ese mes.
+ * Una compra solo puede estar liquidada en un mes: si lo estaba en otro, se mueve a este.
+ * Devuelve true si quedó liquidada.
+ */
+internal suspend fun toggleSettledPurchase(dao: SettledPurchaseDao, purchaseId: Long, yearMonthText: String): Boolean {
+    val wasSettledThisMonth = dao.getSettledForPurchase(purchaseId).any { it.yearMonthText == yearMonthText }
+    dao.deleteSettledPurchasesForPurchase(purchaseId)
+    if (wasSettledThisMonth) return false
+    dao.insertSettledPurchase(SettledPurchaseEntity(purchaseId = purchaseId, yearMonthText = yearMonthText))
+    return true
+}
 
 class FinanceRepository(private val db: AppDatabase) {
 
@@ -67,73 +118,26 @@ class FinanceRepository(private val db: AppDatabase) {
     val receivedIncomes: Flow<List<ReceivedIncomeEntity>> = db.receivedIncomeDao().getAllReceivedIncomes()
     val expensePayments: Flow<List<ExpensePaymentEntity>> = db.expensePaymentDao().getAllExpensePayments()
 
-    suspend fun toggleReceivedIncome(incomeId: Long, targetYearMonth: YearMonth) {
-        val ymText = targetYearMonth.toString()
-        val currentReceived = db.receivedIncomeDao().getAllReceivedIncomes().first()
-        val isCurrentlyReceived = currentReceived.any { it.incomeId == incomeId && it.yearMonthText == ymText }
-        if (isCurrentlyReceived) {
-            db.receivedIncomeDao().deleteReceivedIncome(incomeId, ymText)
-        } else {
-            db.receivedIncomeDao().insertReceivedIncome(
-                ReceivedIncomeEntity(incomeId = incomeId, yearMonthText = ymText)
-            )
-        }
+    // Marcar/desmarcar va en una transacción y no lee la tabla entera: se intenta borrar la marca
+    // y, si no existía, se crea. Así dos toques seguidos no dejan marcas duplicadas ni a medias.
+    suspend fun toggleReceivedIncome(incomeId: Long, targetYearMonth: YearMonth) = db.withTransaction {
+        toggleReceivedIncome(db.receivedIncomeDao(), incomeId, targetYearMonth.toString())
     }
 
-    suspend fun toggleIgnoredExpense(itemKey: String, targetYearMonth: YearMonth) {
-        val currentIgnored = db.ignoredExpenseDao().getAllIgnoredExpenses().first()
-        val isCurrentlyIgnored = currentIgnored.any { it.itemKey == itemKey && it.yearMonthText == targetYearMonth.toString() }
-        if (isCurrentlyIgnored) {
-            db.ignoredExpenseDao().deleteIgnoredExpense(itemKey, targetYearMonth.toString())
-        } else {
-            db.ignoredExpenseDao().insertIgnoredExpense(
-                IgnoredExpenseEntity(itemKey = itemKey, yearMonthText = targetYearMonth.toString())
-            )
-        }
+    suspend fun toggleIgnoredExpense(itemKey: String, targetYearMonth: YearMonth) = db.withTransaction {
+        toggleIgnoredExpense(db.ignoredExpenseDao(), itemKey, targetYearMonth.toString())
     }
 
-    suspend fun togglePaidCreditCard(cardId: Long, targetYearMonth: YearMonth) {
-        val ymText = targetYearMonth.toString()
-        val currentPaid = db.paidCreditCardDao().getAllPaidCreditCards().first()
-        val isCurrentlyPaid = currentPaid.any { it.cardId == cardId && it.yearMonthText == ymText }
-        if (isCurrentlyPaid) {
-            db.paidCreditCardDao().deletePaidCreditCard(cardId, ymText)
-        } else {
-            db.paidCreditCardDao().insertPaidCreditCard(
-                PaidCreditCardEntity(cardId = cardId, yearMonthText = ymText)
-            )
-        }
+    suspend fun togglePaidCreditCard(cardId: Long, targetYearMonth: YearMonth) = db.withTransaction {
+        togglePaidCreditCard(db.paidCreditCardDao(), cardId, targetYearMonth.toString())
     }
 
-    suspend fun togglePaidExpense(itemKey: String, targetYearMonth: YearMonth) {
-        val ymText = targetYearMonth.toString()
-        val currentPaid = db.paidExpenseDao().getAllPaidExpenses().first()
-        val isCurrentlyPaid = currentPaid.any { it.itemKey == itemKey && it.yearMonthText == ymText }
-        if (isCurrentlyPaid) {
-            db.paidExpenseDao().deletePaidExpense(itemKey, ymText)
-        } else {
-            db.paidExpenseDao().insertPaidExpense(
-                PaidExpenseEntity(itemKey = itemKey, yearMonthText = ymText)
-            )
-        }
+    suspend fun togglePaidExpense(itemKey: String, targetYearMonth: YearMonth) = db.withTransaction {
+        togglePaidExpense(db.paidExpenseDao(), itemKey, targetYearMonth.toString())
     }
 
-    suspend fun toggleSettlePurchase(purchaseId: Long, targetYearMonth: YearMonth) {
-        val ymText = targetYearMonth.toString()
-        val currentSettled = db.settledPurchaseDao().getAllSettledPurchases().first()
-        val existing = currentSettled.firstOrNull { it.purchaseId == purchaseId }
-        if (existing != null) {
-            db.settledPurchaseDao().deleteSettledPurchase(purchaseId, existing.yearMonthText)
-            if (existing.yearMonthText != ymText) {
-                db.settledPurchaseDao().insertSettledPurchase(
-                    SettledPurchaseEntity(purchaseId = purchaseId, yearMonthText = ymText)
-                )
-            }
-        } else {
-            db.settledPurchaseDao().insertSettledPurchase(
-                SettledPurchaseEntity(purchaseId = purchaseId, yearMonthText = ymText)
-            )
-        }
+    suspend fun toggleSettlePurchase(purchaseId: Long, targetYearMonth: YearMonth) = db.withTransaction {
+        toggleSettledPurchase(db.settledPurchaseDao(), purchaseId, targetYearMonth.toString())
     }
 
     suspend fun deleteSettledPurchasesForPurchase(purchaseId: Long) {
@@ -178,6 +182,20 @@ class FinanceRepository(private val db: AppDatabase) {
     suspend fun addCardPurchase(purchase: CardPurchaseEntity) = db.cardPurchaseDao().insertCardPurchase(purchase)
     suspend fun updateCardPurchase(purchase: CardPurchaseEntity) = db.cardPurchaseDao().updateCardPurchase(purchase)
 
+    /**
+     * Borra las compras cuya tarjeta ya no existe, y los abonos, cuotas omitidas y marcas de "liquidada"
+     * que quedaron sin compra. Venían de versiones viejas, cuando borrar una tarjeta no borraba sus compras;
+     * no se veían en ninguna pantalla. Devuelve cuántas compras se borraron.
+     */
+    suspend fun deleteOrphanedCardData(): Int = db.withTransaction {
+        val dao = db.cardPurchaseDao()
+        val deletedPurchases = dao.deletePurchasesWithoutCard()
+        dao.deletePaymentsWithoutPurchase()
+        dao.deleteOmittedWithoutPurchase()
+        dao.deleteSettledWithoutPurchase()
+        deletedPurchases
+    }
+
     suspend fun deleteCardPurchaseById(purchaseId: Long) = db.withTransaction {
         deletePurchaseData(purchaseId)
     }
@@ -205,15 +223,7 @@ class FinanceRepository(private val db: AppDatabase) {
 
     fun getIncomesForMonth(targetYearMonth: YearMonth): Flow<List<IncomeEntity>> {
         return incomes.map { incomesList ->
-            incomesList.filter { income ->
-                val entryYearMonth = yearMonthOf(income.date)
-                if (income.totalInstallments > 1) {
-                    val diffMonths = (targetYearMonth.year - entryYearMonth.year) * 12 + (targetYearMonth.monthValue - entryYearMonth.monthValue)
-                    diffMonths in 0 until income.totalInstallments
-                } else {
-                    isInMonth(targetYearMonth, entryYearMonth, income.isRecurring, income.endDateMillis)
-                }
-            }
+            incomesList.filter { income -> incomeAppliesInMonth(income, targetYearMonth) }
         }
     }
 
@@ -240,7 +250,7 @@ class FinanceRepository(private val db: AppDatabase) {
                         payments = paymentsByExpense[expense.id].orEmpty()
                     ) ?: return@mapNotNull null
                     infos[expense.id] = info
-                    expense.copy(amount = info.monthCharge)
+                    expense.copy(amountCents = toCents(info.monthCharge))
                 } else if (isInMonth(targetYearMonth, yearMonthOf(expense.date), expense.isRecurring, expense.endDateMillis)) {
                     expense
                 } else null

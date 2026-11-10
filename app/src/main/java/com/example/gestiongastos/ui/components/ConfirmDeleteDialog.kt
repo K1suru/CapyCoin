@@ -19,7 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.YearMonth
 import java.time.format.TextStyle
-import java.util.Locale
 
 /**
  * Confirmación antes de borrar. Si se pasa [onEndFromMonth] (registros recurrentes),

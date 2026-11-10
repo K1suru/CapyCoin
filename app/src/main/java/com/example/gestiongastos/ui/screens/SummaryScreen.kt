@@ -1,20 +1,19 @@
 package com.example.gestiongastos.ui.screens
 
 import com.example.gestiongastos.i18n.tr
+import com.example.gestiongastos.data.model.monthUsesUsd
 import com.example.gestiongastos.ui.components.privateText
 import com.example.gestiongastos.ui.components.privacyBlur
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,8 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +68,8 @@ import com.example.gestiongastos.ui.components.buildCapyTips
 import com.example.gestiongastos.data.model.CardMonthSummary
 import com.example.gestiongastos.data.model.DEFAULT_USD_RATE
 import com.example.gestiongastos.data.model.payableThisMonth
+import com.example.gestiongastos.data.model.safePercent
+import com.example.gestiongastos.data.model.safeRatio
 import androidx.compose.ui.graphics.Brush
 import java.time.LocalDate
 import java.time.YearMonth
@@ -85,6 +84,7 @@ fun SummaryScreen(
     monthlyExpenses: List<com.example.gestiongastos.data.local.ExpenseEntity> = emptyList(),
     paidCardIds: Set<Long> = emptySet(),
     usdRate: Double = DEFAULT_USD_RATE,
+    isUsdRateOutdated: Boolean = false,
     isAllPaid: Boolean = false,
     isPrivacyMode: Boolean = false,
     onNavigateToScreen: (Screen) -> Unit,
@@ -214,6 +214,19 @@ fun SummaryScreen(
             )
         }
 
+        // Aviso discreto: la TRM no se pudo actualizar y este mes hay montos en dólares
+        if (isUsdRateOutdated && monthUsesUsd(monthlyExpenses, cardSummaries)) {
+            Text(
+                text = tr(
+                    "No se pudo actualizar la TRM: los montos en dólares usan la última conocida (${formatCurrency(usdRate)} por USD).",
+                    "Couldn't update the exchange rate: dollar amounts use the last known one (${formatCurrency(usdRate)} per USD)."
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+            )
+        }
+
         // Capy-consejo con los datos reales del mes
         val capyTips = remember(summaryState, monthlyExpenses, cardSummaries, paidCardIds, ignoredKeys, usdRate, selectedYearMonth, isPrivacyMode) {
             buildCapyTips(
@@ -323,11 +336,11 @@ fun SummaryScreen(
                 CapyBreakdownBentoItem(
                     avatarPainter = painterResource(id = R.drawable.capy_poor),
                     title = tr("Gastos Fijos / Directos", "Fixed / direct expenses"),
-                    subtitle = tr("${((summaryState.directExpenses / totalCombined) * 100).toInt()}% del total", "${((summaryState.directExpenses / totalCombined) * 100).toInt()}% of total"),
+                    subtitle = tr("${safePercent(summaryState.directExpenses, totalCombined)}% del total", "${safePercent(summaryState.directExpenses, totalCombined)}% of total"),
                     amount = summaryState.directExpenses,
                     accentColor = FinanceColors.expenseText(isDark),
                     containerColor = FinanceColors.expenseContainer(isDark),
-                    progress = (summaryState.directExpenses / totalCombined).toFloat(),
+                    progress = safeRatio(summaryState.directExpenses, totalCombined).toFloat(),
                     isPrivacyMode = isPrivacyMode,
                     onClick = { onNavigateToScreen(Screen.Gastos) }
                 )
@@ -335,11 +348,11 @@ fun SummaryScreen(
                 CapyBreakdownBentoItem(
                     avatarPainter = painterResource(id = R.drawable.capy_logo),
                     title = tr("Cuotas Tarjetas de Crédito", "Credit card installments"),
-                    subtitle = tr("${((summaryState.creditCardExpenses / totalCombined) * 100).toInt()}% del total", "${((summaryState.creditCardExpenses / totalCombined) * 100).toInt()}% of total"),
+                    subtitle = tr("${safePercent(summaryState.creditCardExpenses, totalCombined)}% del total", "${safePercent(summaryState.creditCardExpenses, totalCombined)}% of total"),
                     amount = summaryState.creditCardExpenses,
                     accentColor = FinanceColors.cardText(isDark),
                     containerColor = FinanceColors.cardContainer(isDark),
-                    progress = (summaryState.creditCardExpenses / totalCombined).toFloat(),
+                    progress = safeRatio(summaryState.creditCardExpenses, totalCombined).toFloat(),
                     isPrivacyMode = isPrivacyMode,
                     onClick = { onNavigateToScreen(Screen.Tarjetas) }
                 )
@@ -347,11 +360,11 @@ fun SummaryScreen(
                 CapyBreakdownBentoItem(
                     avatarPainter = painterResource(id = R.drawable.capy_savings),
                     title = tr("Ahorros del Mes", "Savings this month"),
-                    subtitle = tr("${((summaryState.totalSavings / totalCombined) * 100).toInt()}% del total", "${((summaryState.totalSavings / totalCombined) * 100).toInt()}% of total"),
+                    subtitle = tr("${safePercent(summaryState.totalSavings, totalCombined)}% del total", "${safePercent(summaryState.totalSavings, totalCombined)}% of total"),
                     amount = summaryState.totalSavings,
                     accentColor = FinanceColors.savingsText(isDark),
                     containerColor = FinanceColors.savingsContainer(isDark),
-                    progress = (summaryState.totalSavings / totalCombined).toFloat(),
+                    progress = safeRatio(summaryState.totalSavings, totalCombined).toFloat(),
                     isPrivacyMode = isPrivacyMode,
                     onClick = { showSavingsDialog = true }
                 )

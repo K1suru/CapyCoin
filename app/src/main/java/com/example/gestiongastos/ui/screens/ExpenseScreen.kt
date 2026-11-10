@@ -1,7 +1,16 @@
 package com.example.gestiongastos.ui.screens
 
+import com.example.gestiongastos.ui.components.longDateFormat
+import com.example.gestiongastos.ui.components.currencySymbolOf
+import com.example.gestiongastos.ui.components.formatUsdWithCop
+import com.example.gestiongastos.data.repository.localDateOf
+import com.example.gestiongastos.data.repository.yearMonthOf
+import com.example.gestiongastos.data.model.toCents
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import com.example.gestiongastos.data.model.markedFirst
+import com.example.gestiongastos.data.model.arrangeByRegistration
 import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.i18n.appLocale
@@ -53,7 +62,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.text.style.TextAlign
@@ -75,7 +83,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -122,14 +129,9 @@ import androidx.compose.material3.Button
 import com.example.gestiongastos.data.model.maintenanceFeeInCop
 import com.example.gestiongastos.data.model.installmentSchedule
 import androidx.compose.ui.platform.LocalContext
-import java.text.SimpleDateFormat
-import java.time.Instant
-import java.time.LocalTime
+import com.example.gestiongastos.data.model.isDeferredOrRecurring
 import java.time.YearMonth
-import java.time.ZoneId
-import java.util.Calendar
 import java.util.Date
-import java.util.Locale
 
 sealed class UnifiedExpenseItem {
     abstract val key: String
@@ -244,7 +246,7 @@ fun ExpenseScreen(
 
         // 1. Direct Expenses
         expenses.forEach { exp ->
-            val expYm = YearMonth.from(Instant.ofEpochMilli(exp.date).atZone(ZoneId.systemDefault()).toLocalDate())
+            val expYm = yearMonthOf(exp.date)
             val installment = expenseInstallments[exp.id]
             val isCarriedOver = exp.isRecurring || expYm.isBefore(selectedYearMonth) || installment != null
             rawList.add(UnifiedExpenseItem.DirectExpense(exp, isCarriedOver, installment))
@@ -253,9 +255,8 @@ fun ExpenseScreen(
         // 2. Card Purchases and Maintenance Fees
         cardSummaries.forEach { summary ->
             summary.purchases.filter { it.statusType == InstallmentStatusType.ACTIVE }.forEach { detail ->
-                val symbol = if (detail.currency == "USD") "USD $" else "$"
-                val purchaseYm = YearMonth.from(Instant.ofEpochMilli(detail.purchaseDateMillis).atZone(ZoneId.systemDefault()).toLocalDate())
-                val isCarriedOver = detail.isRecurring || (detail.totalInstallments > 1 && (detail.currentInstallment > 1 || purchaseYm.isBefore(selectedYearMonth)))
+                val symbol = currencySymbolOf(detail.currency)
+                val isCarriedOver = detail.isDeferredOrRecurring(selectedYearMonth)
                 rawList.add(UnifiedExpenseItem.CardInstallmentExpense(summary.cardName, detail, symbol, isCarriedOver))
             }
             val feeInCop = summary.maintenanceFeeInCop(usdRate)
@@ -266,27 +267,13 @@ fun ExpenseScreen(
 
         // 3. Savings
         savings.forEach { sav ->
-            val savYm = YearMonth.from(Instant.ofEpochMilli(sav.date).atZone(ZoneId.systemDefault()).toLocalDate())
+            val savYm = yearMonthOf(sav.date)
             val isCarriedOver = sav.isRecurring || savYm.isBefore(selectedYearMonth)
             rawList.add(UnifiedExpenseItem.SavingsExpense(sav, isCarriedOver))
         }
 
-        // Separate items into current month registrations and carried-over monthly installments
-        val currentMonthItems = rawList.filter { !it.isCarriedOver }
-        val carriedOverItems = rawList.filter { it.isCarriedOver }
-
-        // Ambos grupos siguen la preferencia del usuario (ver registrationOrder)
-        val oldestFirst = registrationOrder
-        val order = if (expenseSortOrder == ExpenseSortOrder.OLDEST_FIRST) oldestFirst else oldestFirst.reversed()
-        val sortedCurrentMonthItems = currentMonthItems.sortedWith(order)
-        val sortedCarriedOverItems = carriedOverItems.sortedWith(order)
-
-        // Assemble list based on installmentsPosition setting
-        if (installmentsPosition == InstallmentPosition.FIRST) {
-            sortedCarriedOverItems + sortedCurrentMonthItems
-        } else {
-            sortedCurrentMonthItems + sortedCarriedOverItems
-        }
+        // Lo del mes y lo arrastrado siguen la preferencia del usuario (ver registrationOrder)
+        arrangeByRegistration(rawList, registrationOrder, expenseSortOrder, installmentsPosition) { it.isCarriedOver }
     }
 
     val filteredItems = remember(allUnifiedItems, selectedFilterIndex) {
@@ -324,11 +311,22 @@ fun ExpenseScreen(
     // Lista agrupada: "Hoy", "Ayer", días del mes y el bloque de cuotas/fijos/recurrentes
     val sections = remember(displayedItems, paidExpenseKeys, movePaidToTop) {
         groupExpenseItems(displayedItems).map { (title, items) ->
-            title to if (movePaidToTop) items.sortedWith(compareByDescending { it.key in paidExpenseKeys }) else items
+            title to markedFirst(items, movePaidToTop) { it.key in paidExpenseKeys }
         }
     }
 
     val isDark = isAppDark()
+
+    // Al cambiar el orden la lista vuelve al inicio; si no, se quedaba anclada donde estaba
+    // y parecía que el orden no había cambiado.
+    val expenseListState = rememberLazyListState()
+    var appliedSortOrder by remember { mutableStateOf(expenseSortOrder) }
+    LaunchedEffect(expenseSortOrder) {
+        if (appliedSortOrder != expenseSortOrder) {
+            appliedSortOrder = expenseSortOrder
+            expenseListState.scrollToItem(0)
+        }
+    }
 
     Scaffold(
         modifier = modifier,
@@ -586,6 +584,7 @@ fun ExpenseScreen(
                 }
             } else {
                 LazyColumn(
+                    state = expenseListState,
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 88.dp)
@@ -615,7 +614,7 @@ fun ExpenseScreen(
                                 when (item) {
                                     // En cuotas, `amount` es el cobro del mes: se edita con el valor fijo de la cuota
                                     is UnifiedExpenseItem.DirectExpense -> expenseToEdit = item.installment
-                                        ?.let { item.expense.copy(amount = it.installmentAmount) } ?: item.expense
+                                        ?.let { item.expense.copy(amountCents = toCents(it.installmentAmount)) } ?: item.expense
                                     is UnifiedExpenseItem.CardInstallmentExpense -> purchaseToEdit = item.detail
                                     is UnifiedExpenseItem.SavingsExpense -> savingToEdit = item.saving
                                     is UnifiedExpenseItem.CardFeeExpense -> { /* Read-only fee */ }
@@ -716,22 +715,22 @@ fun ExpenseScreen(
         )
     }
 
-    if (purchaseToEdit != null) {
-        val card = allCards.find { it.id == purchaseToEdit!!.cardId }
+    purchaseToEdit?.let { editing ->
+        val card = allCards.find { it.id == editing.cardId }
         AddEditPurchaseDialog(
             cardName = card?.name ?: tr("Tarjeta", "Card"),
             cardInterestRate = card?.interestRate ?: 0.0,
             cardFirstInstallmentInterestFree = card?.isFirstInstallmentInterestFree ?: false,
-            purchaseToEdit = purchaseToEdit,
+            purchaseToEdit = editing,
             selectedYearMonth = selectedYearMonth,
             onDismiss = { purchaseToEdit = null },
             onSave = { concept, totalAmount, installments, dateMillis, isInterestFree, isRecurring, currency ->
                 onUpdateCardPurchase(
                     CardPurchaseEntity(
-                        id = purchaseToEdit!!.purchaseId,
-                        cardId = purchaseToEdit!!.cardId,
+                        id = editing.purchaseId,
+                        cardId = editing.cardId,
                         concept = concept,
-                        totalAmount = totalAmount,
+                        totalAmountCents = toCents(totalAmount),
                         installments = installments,
                         purchaseDate = dateMillis,
                         isInterestFree = isInterestFree,
@@ -751,7 +750,7 @@ fun ExpenseScreen(
  * y entonces lo anotado de noche quedaba después de lo anotado en la mañana de días posteriores.
  */
 private val registrationOrder: Comparator<UnifiedExpenseItem> = compareBy(
-    { Instant.ofEpochMilli(it.dateMillis).atZone(ZoneId.systemDefault()).toLocalDate() },
+    { localDateOf(it.dateMillis) },
     {
         when (it) {
             is UnifiedExpenseItem.DirectExpense -> 0
@@ -788,7 +787,7 @@ fun groupExpenseItems(items: List<UnifiedExpenseItem>): List<Pair<String, List<U
         val title = if (item.isCarriedOver) {
             CARRIED_OVER_SECTION
         } else {
-            val day = Instant.ofEpochMilli(item.dateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+            val day = localDateOf(item.dateMillis)
             when (day) {
                 today -> tr("Hoy", "Today")
                 today.minusDays(1) -> tr("Ayer", "Yesterday")
@@ -903,11 +902,11 @@ fun ExpenseItemCard(
 
     val amountStr = when (item) {
         is UnifiedExpenseItem.DirectExpense -> {
-            if (item.expense.currency == "USD") "${formatUsd(item.expense.amount)} (~${formatCurrency(item.expense.amount * usdRate)})"
+            if (item.expense.currency == "USD") formatUsdWithCop(item.expense.amount, usdRate)
             else formatCurrency(item.amount)
         }
         is UnifiedExpenseItem.CardInstallmentExpense -> {
-            if (item.detail.currency == "USD") "${formatUsd(item.detail.monthlyPayment)} (~${formatCurrency(item.detail.monthlyPayment * usdRate)})"
+            if (item.detail.currency == "USD") formatUsdWithCop(item.detail.monthlyPayment, usdRate)
             else formatCurrency(item.amount, item.currencySymbol)
         }
         is UnifiedExpenseItem.CardFeeExpense -> formatCurrency(item.amount, item.currencySymbol)
@@ -1313,7 +1312,7 @@ fun ExpenseItemCard(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                         CardDetailRow(
                             label = tr("Cuota del Mes", "This month's installment"),
-                            value = if (detail.currency == "USD") "${formatUsd(detail.monthlyPayment)} (~${formatCurrency(detail.monthlyPayment * usdRate)})"
+                            value = if (detail.currency == "USD") formatUsdWithCop(detail.monthlyPayment, usdRate)
                                     else formatCurrency(detail.monthlyPayment, item.currencySymbol),
                             isHighlight = true,
                             highlightColor = FinanceColors.cardText(isDark)
@@ -1322,13 +1321,13 @@ fun ExpenseItemCard(
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                             CardDetailRow(
                                 label = "Saldo Restante",
-                                value = if (detail.currency == "USD") "${formatUsd(detail.remainingBalanceToPay)} (~${formatCurrency(detail.remainingBalanceToPay * usdRate)})"
+                                value = if (detail.currency == "USD") formatUsdWithCop(detail.remainingBalanceToPay, usdRate)
                                         else formatCurrency(detail.remainingBalanceToPay, item.currencySymbol)
                             )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                             CardDetailRow(
                                 label = "Monto Total Compra",
-                                value = if (detail.currency == "USD") "${formatUsd(detail.totalAmount)} (~${formatCurrency(detail.totalAmount * usdRate)})"
+                                value = if (detail.currency == "USD") formatUsdWithCop(detail.totalAmount, usdRate)
                                         else formatCurrency(detail.totalAmount, item.currencySymbol)
                             )
                         }
@@ -1417,7 +1416,7 @@ fun AddEditExpenseDialog(
     var cardDateMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val cardDatePickerDialog = rememberDatePicker(cardDateMillis) { cardDateMillis = it }
 
-    val purchaseDateFormat = remember { SimpleDateFormat(tr("dd 'de' MMMM 'de' yyyy", "MMMM d, yyyy"), appLocale()) }
+    val purchaseDateFormat = remember { longDateFormat() }
 
     val parsedTotalAmount = parseAmount(cardTotalAmountText) ?: 0.0
     val parsedInstallments = installmentsText.toIntOrNull() ?: 1
@@ -1807,9 +1806,9 @@ fun AddEditExpenseDialog(
                     }
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1821,14 +1820,14 @@ fun AddEditExpenseDialog(
                 onClick = {
                     if (selectedTab == 0) {
                         val amount = parseAmount(amountText)
+                        val installments = if (isInInstallments) parseExpenseInstallments(expenseInstallmentsText) else 0
                         if (concept.isBlank()) {
                             errorMessage = tr("Por favor ingresa un concepto", "Enter a name")
                         } else if (amount == null || amount <= 0) {
                             errorMessage = tr("Ingresa un monto válido mayor a 0", "Enter a valid amount greater than 0")
-                        } else if (isInInstallments && parseExpenseInstallments(expenseInstallmentsText) == null) {
+                        } else if (installments == null) {
                             errorMessage = tr("Ingresa un número de cuotas entre 1 y $MAX_EXPENSE_INSTALLMENTS", "Enter a number of installments between 1 and $MAX_EXPENSE_INSTALLMENTS")
                         } else {
-                            val installments = if (isInInstallments) parseExpenseInstallments(expenseInstallmentsText)!! else 0
                             onSaveExpense(concept.trim(), amount, expenseDateMillis, isRecurring && installments == 0, directCurrency, installments)
                         }
                     } else if (selectedTab == 1) {
@@ -1892,7 +1891,7 @@ fun AddEditDirectExpenseDialog(
 
     val context = LocalContext.current
     val datePickerDialog = rememberDatePicker(expenseDateMillis) { expenseDateMillis = it }
-    val expenseDateFormat = remember { SimpleDateFormat(tr("dd 'de' MMMM 'de' yyyy", "MMMM d, yyyy"), appLocale()) }
+    val expenseDateFormat = remember { longDateFormat() }
 
     FormSheet(
         onDismissRequest = onDismiss,
@@ -2014,9 +2013,9 @@ fun AddEditDirectExpenseDialog(
                     )
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -2027,16 +2026,16 @@ fun AddEditDirectExpenseDialog(
             Button(
                 onClick = {
                     val amount = parseAmount(amountText)
+                    val installments = if (isInInstallments) parseExpenseInstallments(installmentsText) else 0
                     if (concept.isBlank()) {
                         errorMessage = tr("Por favor ingresa un concepto", "Enter a name")
                     } else if (amount == null || amount <= 0) {
                         errorMessage = tr("Ingresa un monto válido mayor a 0", "Enter a valid amount greater than 0")
-                    } else if (isInInstallments && parseExpenseInstallments(installmentsText) == null) {
+                    } else if (installments == null) {
                         errorMessage = tr("Ingresa un número de cuotas entre 1 y $MAX_EXPENSE_INSTALLMENTS", "Enter a number of installments between 1 and $MAX_EXPENSE_INSTALLMENTS")
                     } else {
-                        val installments = if (isInInstallments) parseExpenseInstallments(installmentsText)!! else 0
-                        val base = expenseToEdit ?: ExpenseEntity(concept = concept.trim(), amount = amount, date = expenseDateMillis, isRecurring = isRecurring, currency = currency)
-                        onSave(base.copy(concept = concept.trim(), amount = amount, date = expenseDateMillis, isRecurring = isRecurring && installments == 0, currency = currency, installments = installments))
+                        val base = expenseToEdit ?: ExpenseEntity(concept = concept.trim(), amountCents = toCents(amount), date = expenseDateMillis, isRecurring = isRecurring, currency = currency)
+                        onSave(base.copy(concept = concept.trim(), amountCents = toCents(amount), date = expenseDateMillis, isRecurring = isRecurring && installments == 0, currency = currency, installments = installments))
                     }
                 }
             ) {

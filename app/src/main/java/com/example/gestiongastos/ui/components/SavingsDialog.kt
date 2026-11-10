@@ -1,7 +1,9 @@
 package com.example.gestiongastos.ui.components
 
+import com.example.gestiongastos.ui.components.shortDateFormat
+import com.example.gestiongastos.ui.components.longDateFormat
+import com.example.gestiongastos.data.model.toCents
 import com.example.gestiongastos.i18n.tr
-import com.example.gestiongastos.i18n.appLocale
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -23,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Autorenew
@@ -36,7 +37,6 @@ import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,9 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.gestiongastos.data.local.SavingsEntity
@@ -68,11 +66,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
 import com.example.gestiongastos.data.model.ItemKeys
-import java.util.Calendar
-import java.text.SimpleDateFormat
 import java.time.YearMonth
 import java.util.Date
-import java.util.Locale
 
 @Composable
 fun SavingsManagerDialog(
@@ -265,7 +260,7 @@ fun SavingsItemCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val dateFormat = SimpleDateFormat(tr("dd MMM yyyy", "MMM d, yyyy"), appLocale())
+    val dateFormat = shortDateFormat()
     val formattedDate = dateFormat.format(Date(saving.date))
     val isDark = isAppDark()
 
@@ -419,7 +414,7 @@ fun AddEditSavingsDialog(
 
     val context = LocalContext.current
     val datePickerDialog = rememberDatePicker(savingDateMillis) { savingDateMillis = it }
-    val savingDateFormat = remember { SimpleDateFormat(tr("dd 'de' MMMM 'de' yyyy", "MMMM d, yyyy"), appLocale()) }
+    val savingDateFormat = remember { longDateFormat() }
 
     FormSheet(
         onDismissRequest = onDismiss,
@@ -508,9 +503,9 @@ fun AddEditSavingsDialog(
                     )
                 }
 
-                if (errorMessage != null) {
+                errorMessage?.let { errorText ->
                     Text(
-                        text = errorMessage!!,
+                        text = errorText,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -526,8 +521,8 @@ fun AddEditSavingsDialog(
                     } else if (amount == null || amount <= 0) {
                         errorMessage = tr("Ingresa un monto válido mayor a 0", "Enter a valid amount greater than 0")
                     } else {
-                        val base = savingToEdit ?: SavingsEntity(concept = concept.trim(), amount = amount, date = savingDateMillis, isRecurring = isRecurring)
-                        onSave(base.copy(concept = concept.trim(), amount = amount, date = savingDateMillis, isRecurring = isRecurring))
+                        val base = savingToEdit ?: SavingsEntity(concept = concept.trim(), amountCents = toCents(amount), date = savingDateMillis, isRecurring = isRecurring)
+                        onSave(base.copy(concept = concept.trim(), amountCents = toCents(amount), date = savingDateMillis, isRecurring = isRecurring))
                     }
                 }
             ) {

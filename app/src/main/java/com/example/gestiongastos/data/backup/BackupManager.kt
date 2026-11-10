@@ -1,6 +1,5 @@
 package com.example.gestiongastos.data.backup
 
-import com.example.gestiongastos.data.local.ExpensePaymentEntity
 import com.example.gestiongastos.i18n.tr
 import android.content.Context
 import android.content.Intent
@@ -8,18 +7,6 @@ import android.net.Uri
 import androidx.core.content.FileProvider
 import androidx.room.withTransaction
 import com.example.gestiongastos.data.local.AppDatabase
-import com.example.gestiongastos.data.local.CardPurchaseEntity
-import com.example.gestiongastos.data.local.CardPurchasePaymentEntity
-import com.example.gestiongastos.data.local.CreditCardEntity
-import com.example.gestiongastos.data.local.ExpenseEntity
-import com.example.gestiongastos.data.local.IgnoredExpenseEntity
-import com.example.gestiongastos.data.local.IncomeEntity
-import com.example.gestiongastos.data.local.OmittedInstallmentEntity
-import com.example.gestiongastos.data.local.PaidCreditCardEntity
-import com.example.gestiongastos.data.local.PaidExpenseEntity
-import com.example.gestiongastos.data.local.ReceivedIncomeEntity
-import com.example.gestiongastos.data.local.SavingsEntity
-import com.example.gestiongastos.data.local.SettledPurchaseEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -31,9 +18,6 @@ import java.util.Date
 import java.util.Locale
 
 object BackupManager {
-
-    private fun optNullableLong(obj: JSONObject, key: String): Long? =
-        if (!obj.has(key) || obj.isNull(key)) null else obj.optLong(key)
 
     suspend fun generateBackupJson(db: AppDatabase): String = withContext(Dispatchers.IO) {
         val incomes = db.incomeDao().getAllIncomes().first()
@@ -52,7 +36,7 @@ object BackupManager {
 
         val root = JSONObject().apply {
             put("app", "CapyCoin")
-            put("version", 1)
+            put("version", BACKUP_FORMAT_VERSION)
             put("exportTimestamp", System.currentTimeMillis())
             put("exportDate", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
 
@@ -62,15 +46,15 @@ object BackupManager {
                     put(JSONObject().apply {
                         put("id", it.id)
                         put("concept", it.concept)
-                        put("amount", it.amount)
+                        put("amountCents", it.amountCents)
                         put("date", it.date)
                         put("isRecurring", it.isRecurring)
                         put("linkedExpenseIdsText", it.linkedExpenseIdsText ?: JSONObject.NULL)
                         put("linkedCardPurchaseIdsText", it.linkedCardPurchaseIdsText ?: JSONObject.NULL)
-                        put("extraAmount", it.extraAmount)
+                        put("extraAmountCents", it.extraAmountCents)
                         put("extraConcept", it.extraConcept ?: JSONObject.NULL)
                         put("totalInstallments", it.totalInstallments)
-                        put("totalAmount", it.totalAmount)
+                        put("totalAmountCents", it.totalAmountCents)
                         put("endDateMillis", it.endDateMillis ?: JSONObject.NULL)
                     })
                 }
@@ -82,7 +66,7 @@ object BackupManager {
                     put(JSONObject().apply {
                         put("id", it.id)
                         put("concept", it.concept)
-                        put("amount", it.amount)
+                        put("amountCents", it.amountCents)
                         put("date", it.date)
                         put("isRecurring", it.isRecurring)
                         put("currency", it.currency)
@@ -98,7 +82,7 @@ object BackupManager {
                     put(JSONObject().apply {
                         put("id", it.id)
                         put("expenseId", it.expenseId)
-                        put("amount", it.amount)
+                        put("amountCents", it.amountCents)
                         put("date", it.date)
                         put("yearMonthText", it.yearMonthText)
                     })
@@ -114,12 +98,12 @@ object BackupManager {
                         put("cutoffDay", it.cutoffDay)
                         put("paymentDay", it.paymentDay)
                         put("interestRate", it.interestRate)
-                        put("maintenanceFee", it.maintenanceFee)
+                        put("maintenanceFeeCents", it.maintenanceFeeCents)
                         put("currency", it.currency)
                         put("isFeeWaiverEnabled", it.isFeeWaiverEnabled)
-                        put("minSpendForFeeWaiver", it.minSpendForFeeWaiver)
+                        put("minSpendForFeeWaiverCents", it.minSpendForFeeWaiverCents)
                         put("isFirstInstallmentInterestFree", it.isFirstInstallmentInterestFree)
-                        put("creditLimit", it.creditLimit)
+                        put("creditLimitCents", it.creditLimitCents)
                         put("colorIndex", it.colorIndex)
                     })
                 }
@@ -132,7 +116,7 @@ object BackupManager {
                         put("id", it.id)
                         put("cardId", it.cardId)
                         put("concept", it.concept)
-                        put("totalAmount", it.totalAmount)
+                        put("totalAmountCents", it.totalAmountCents)
                         put("installments", it.installments)
                         put("purchaseDate", it.purchaseDate)
                         put("isInterestFree", it.isInterestFree)
@@ -148,7 +132,7 @@ object BackupManager {
                     put(JSONObject().apply {
                         put("id", it.id)
                         put("concept", it.concept)
-                        put("amount", it.amount)
+                        put("amountCents", it.amountCents)
                         put("date", it.date)
                         put("isRecurring", it.isRecurring)
                         put("endDateMillis", it.endDateMillis ?: JSONObject.NULL)
@@ -173,7 +157,7 @@ object BackupManager {
                     put(JSONObject().apply {
                         put("id", it.id)
                         put("purchaseId", it.purchaseId)
-                        put("amount", it.amount)
+                        put("amountCents", it.amountCents)
                         put("date", it.date)
                         put("yearMonthText", it.yearMonthText)
                     })
@@ -239,29 +223,28 @@ object BackupManager {
         root.toString(2)
     }
 
+    /**
+     * Escribe la copia en la caché privada (carpeta "backups", la única que expone el FileProvider
+     * para esto) y abre el menú de compartir para que el usuario elija dónde guardarla.
+     */
     suspend fun exportBackup(
         context: Context,
         db: AppDatabase
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val jsonString = generateBackupJson(db)
-            val root = JSONObject(jsonString)
-            val incomesCount = root.optJSONArray("incomes")?.length() ?: 0
-            val expensesCount = root.optJSONArray("expenses")?.length() ?: 0
-            val cardsCount = root.optJSONArray("credit_cards")?.length() ?: 0
-            val purchasesCount = root.optJSONArray("card_purchases")?.length() ?: 0
-            val savingsCount = root.optJSONArray("savings")?.length() ?: 0
+    ): Result<String> {
+        return try {
+            val (fileName, timeStamp, cacheFile, counts) = withContext(Dispatchers.IO) {
+                val jsonString = generateBackupJson(db)
+                val root = JSONObject(jsonString)
+                val counts = listOf("incomes", "expenses", "credit_cards", "card_purchases", "savings")
+                    .map { root.optJSONArray(it)?.length() ?: 0 }
 
-            val timeStamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.getDefault()).format(Date())
-            val fileName = "CapyCoin_Backup_$timeStamp.json"
-
-            // La copia queda en la caché privada de la app y el usuario elige dónde guardarla
-            // (Archivos, correo, etc.) desde el menú de compartir. Ya no se escribe sin cifrar
-            // en la carpeta pública de Descargas, donde otras apps podían leerla.
-            val backupDir = File(context.cacheDir, "backups").apply { mkdirs() }
-            backupDir.listFiles()?.forEach { it.delete() }
-            val cacheFile = File(backupDir, fileName)
-            cacheFile.writeText(jsonString)
+                val timeStamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.getDefault()).format(Date())
+                val fileName = "CapyCoin_Backup_$timeStamp.json"
+                val backupDir = File(context.cacheDir, "backups").apply { mkdirs() }
+                val file = writeBackupFileSafely(backupDir, fileName, jsonString)
+                ExportedBackup(fileName, timeStamp, file, counts)
+            }
+            val (incomesCount, expensesCount, cardsCount, purchasesCount, savingsCount) = counts
 
             val fileUri = FileProvider.getUriForFile(
                 context,
@@ -278,16 +261,23 @@ object BackupManager {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
 
-            context.startActivity(Intent.createChooser(shareIntent, tr("Guardar / Compartir Copia de Seguridad", "Save / share backup")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
+            // Abrir otra pantalla es trabajo del hilo principal, no del de entrada/salida
+            withContext(Dispatchers.Main) {
+                context.startActivity(Intent.createChooser(shareIntent, tr("Guardar / Compartir Copia de Seguridad", "Save / share backup")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }
 
             val summary = tr("Copia creada ($fileName). Elige dónde guardarla en el menú de compartir:\n• $incomesCount ingresos\n• $expensesCount gastos fijos\n• $cardsCount tarjetas\n• $purchasesCount compras a cuotas\n• $savingsCount ahorros", "Backup created ($fileName). Choose where to save it in the share menu:\n• $incomesCount income items\n• $expensesCount fixed expenses\n• $cardsCount cards\n• $purchasesCount installment purchases\n• $savingsCount savings")
             Result.success(summary)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
+
+    private data class ExportedBackup(val fileName: String, val timeStamp: String, val file: File, val counts: List<Int>)
 
     fun newBackupFileName(): String {
         val timeStamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.getDefault()).format(Date())
@@ -325,268 +315,84 @@ object BackupManager {
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val jsonString = context.contentResolver.openInputStream(uri)?.use { stream ->
-                stream.bufferedReader().use { it.readText() }
+                readBackupText(stream)
             } ?: return@withContext Result.failure(Exception(tr("No se pudo leer el archivo seleccionado.", "Couldn't read the selected file.")))
             restoreFromJsonString(db, jsonString)
+        } catch (e: BackupTooLargeException) {
+            Result.failure(Exception(tr(
+                "El archivo pesa más de ${MAX_BACKUP_BYTES / (1024 * 1024)} MB y no parece una copia de CapyCoin. No se restauró nada.",
+                "The file is larger than ${MAX_BACKUP_BYTES / (1024 * 1024)} MB and doesn't look like a CapyCoin backup. Nothing was restored."
+            )))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    /** Texto con el que se nombra cada lista de la copia al avisar de registros no restaurados. */
+    private fun sectionLabel(section: String): String = when (section) {
+        BackupSections.INCOMES -> tr("ingresos", "income items")
+        BackupSections.EXPENSES -> tr("gastos fijos", "fixed expenses")
+        BackupSections.EXPENSE_PAYMENTS -> tr("abonos a gastos", "extra payments to expenses")
+        BackupSections.CREDIT_CARDS -> tr("tarjetas", "cards")
+        BackupSections.CARD_PURCHASES -> tr("compras con tarjeta", "card purchases")
+        BackupSections.SAVINGS -> tr("ahorros", "savings")
+        BackupSections.CARD_PURCHASE_PAYMENTS -> tr("abonos a compras", "extra payments to purchases")
+        else -> tr("marcas (pagado, omitido, recibido…)", "marks (paid, skipped, received…)")
+    }
+
+    private fun describeCounts(counts: Map<String, Int>): String =
+        counts.entries.groupBy({ sectionLabel(it.key) }, { it.value })
+            .map { (label, values) -> "${values.sum()} $label" }
+            .joinToString(", ")
+
+    private fun rejectionMessage(reason: BackupRejection): String = when (reason) {
+        BackupRejection.NOT_A_BACKUP, BackupRejection.WRONG_APP ->
+            tr("El archivo no es una copia de seguridad válida de CapyCoin.", "This file isn't a valid CapyCoin backup.")
+        BackupRejection.UNSUPPORTED_VERSION ->
+            tr("La copia es de una versión más nueva de CapyCoin o su versión no es válida. Actualiza la app e inténtalo de nuevo.", "This backup comes from a newer CapyCoin version, or its version isn't valid. Update the app and try again.")
+        BackupRejection.INVALID_STRUCTURE ->
+            tr("La copia de seguridad está dañada (su estructura no es la esperada).", "The backup is damaged (its structure isn't what was expected).")
+        BackupRejection.EMPTY ->
+            tr("La copia no tiene ningún registro válido. No se restauró nada para no borrar tus datos actuales.", "The backup has no valid records. Nothing was restored, so your current data is untouched.")
+    }
+
+    private fun plainValue(value: Any?): Any? = when (value) {
+        null, JSONObject.NULL -> null
+        is JSONObject -> toPlainMap(value)
+        is JSONArray -> List(value.length()) { plainValue(value.opt(it)) }
+        else -> value
+    }
+
+    /** Pasa el JSON a mapas y listas normales para validarlo con [parseBackup]. */
+    private fun toPlainMap(obj: JSONObject): Map<String, Any?> {
+        val map = LinkedHashMap<String, Any?>()
+        obj.keys().forEach { key -> map[key] = plainValue(obj.opt(key)) }
+        return map
+    }
+
+    /**
+     * Restaura una copia. Primero valida TODO el archivo ([parseBackup]); si se rechaza, no se toca
+     * la base de datos. Si es válido, borrar e insertar van en una sola transacción: o queda la copia
+     * completa o, si algo falla, los datos de antes. El mensaje avisa de los registros no restaurados.
+     */
     suspend fun restoreFromJsonString(
         db: AppDatabase,
         jsonString: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val cleanJson = jsonString.trim().removePrefix("\uFEFF")
-            val root = JSONObject(cleanJson)
-
-            val hasDataArrays = root.has("incomes") || root.has("expenses") || root.has("credit_cards") || root.has("card_purchases")
-            val hasAppMarker = root.has("app") || root.has("version")
-            if (!hasDataArrays && !hasAppMarker) {
-                return@withContext Result.failure(Exception(tr("El archivo no es una copia de seguridad válida de CapyCoin.", "This file isn't a valid CapyCoin backup.")))
+            val root = try {
+                JSONObject(cleanJson)
+            } catch (e: Exception) {
+                return@withContext Result.failure(Exception(tr("El archivo no es una copia de seguridad válida de CapyCoin (no se pudo leer).", "This file isn't a valid CapyCoin backup (it couldn't be read).")))
             }
 
-            val incomesList = mutableListOf<IncomeEntity>()
-            root.optJSONArray("incomes")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    incomesList.add(
-                        IncomeEntity(
-                            id = obj.optLong("id", 0L),
-                            concept = obj.optString("concept", "Ingreso").ifBlank { "Ingreso" },
-                            amount = obj.optDouble("amount", 0.0),
-                            date = obj.optLong("date", System.currentTimeMillis()),
-                            isRecurring = obj.optBoolean("isRecurring", false),
-                            linkedExpenseIdsText = if (obj.isNull("linkedExpenseIdsText") || !obj.has("linkedExpenseIdsText")) null else obj.optString("linkedExpenseIdsText").takeIf { it.isNotBlank() },
-                            linkedCardPurchaseIdsText = if (obj.isNull("linkedCardPurchaseIdsText") || !obj.has("linkedCardPurchaseIdsText")) null else obj.optString("linkedCardPurchaseIdsText").takeIf { it.isNotBlank() },
-                            extraAmount = obj.optDouble("extraAmount", 0.0),
-                            extraConcept = if (obj.isNull("extraConcept") || !obj.has("extraConcept")) null else obj.optString("extraConcept").takeIf { it.isNotBlank() },
-                            totalInstallments = obj.optInt("totalInstallments", 1).coerceAtLeast(1),
-                            totalAmount = obj.optDouble("totalAmount", 0.0),
-                            endDateMillis = optNullableLong(obj, "endDateMillis")
-                        )
-                    )
-                }
+            val parsed = when (val outcome = parseBackup(toPlainMap(root))) {
+                is BackupParseOutcome.Rejected -> return@withContext Result.failure(Exception(rejectionMessage(outcome.reason)))
+                is BackupParseOutcome.Ok -> outcome
             }
+            val data = parsed.data
 
-            val expensesList = mutableListOf<ExpenseEntity>()
-            root.optJSONArray("expenses")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    expensesList.add(
-                        ExpenseEntity(
-                            id = obj.optLong("id", 0L),
-                            concept = obj.optString("concept", "Gasto").ifBlank { "Gasto" },
-                            amount = obj.optDouble("amount", 0.0),
-                            date = obj.optLong("date", System.currentTimeMillis()),
-                            isRecurring = obj.optBoolean("isRecurring", false),
-                            currency = obj.optString("currency", "COP"),
-                            endDateMillis = optNullableLong(obj, "endDateMillis"),
-                            installments = obj.optInt("installments", 0).coerceAtLeast(0)
-                        )
-                    )
-                }
-            }
-
-            val expensePaymentsList = mutableListOf<ExpensePaymentEntity>()
-            root.optJSONArray("expense_payments")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    expensePaymentsList.add(
-                        ExpensePaymentEntity(
-                            id = obj.optLong("id", 0L),
-                            expenseId = obj.optLong("expenseId", 0L),
-                            amount = obj.optDouble("amount", 0.0),
-                            date = obj.optLong("date", System.currentTimeMillis()),
-                            yearMonthText = obj.optString("yearMonthText", "")
-                        )
-                    )
-                }
-            }
-
-            val cardsList = mutableListOf<CreditCardEntity>()
-            root.optJSONArray("credit_cards")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    cardsList.add(
-                        CreditCardEntity(
-                            id = obj.optLong("id", 0L),
-                            name = obj.optString("name", "Tarjeta").ifBlank { "Tarjeta" },
-                            cutoffDay = obj.optInt("cutoffDay", 15),
-                            paymentDay = obj.optInt("paymentDay", 0),
-                            interestRate = obj.optDouble("interestRate", 0.0),
-                            maintenanceFee = obj.optDouble("maintenanceFee", 0.0),
-                            currency = obj.optString("currency", "COP"),
-                            isFeeWaiverEnabled = obj.optBoolean("isFeeWaiverEnabled", false),
-                            minSpendForFeeWaiver = obj.optDouble("minSpendForFeeWaiver", 0.0),
-                            isFirstInstallmentInterestFree = obj.optBoolean("isFirstInstallmentInterestFree", false),
-                            creditLimit = obj.optDouble("creditLimit", 0.0).takeIf { !it.isNaN() } ?: 0.0,
-                            colorIndex = obj.optInt("colorIndex", -1)
-                        )
-                    )
-                }
-            }
-
-            val purchasesList = mutableListOf<CardPurchaseEntity>()
-            root.optJSONArray("card_purchases")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    purchasesList.add(
-                        CardPurchaseEntity(
-                            id = obj.optLong("id", 0L),
-                            cardId = obj.optLong("cardId", 0L),
-                            concept = obj.optString("concept", "Compra").ifBlank { "Compra" },
-                            totalAmount = obj.optDouble("totalAmount", 0.0),
-                            installments = obj.optInt("installments", 1).coerceAtLeast(1),
-                            purchaseDate = obj.optLong("purchaseDate", System.currentTimeMillis()),
-                            isInterestFree = obj.optBoolean("isInterestFree", false),
-                            isRecurring = obj.optBoolean("isRecurring", false),
-                            currency = obj.optString("currency", "COP")
-                        )
-                    )
-                }
-            }
-
-            val savingsList = mutableListOf<SavingsEntity>()
-            root.optJSONArray("savings")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    savingsList.add(
-                        SavingsEntity(
-                            id = obj.optLong("id", 0L),
-                            concept = obj.optString("concept", "Ahorro").ifBlank { "Ahorro" },
-                            amount = obj.optDouble("amount", 0.0),
-                            date = obj.optLong("date", System.currentTimeMillis()),
-                            isRecurring = obj.optBoolean("isRecurring", false),
-                            endDateMillis = optNullableLong(obj, "endDateMillis")
-                        )
-                    )
-                }
-            }
-
-            val omittedList = mutableListOf<OmittedInstallmentEntity>()
-            root.optJSONArray("omitted_installments")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val ymText = obj.optString("yearMonthText", "")
-                    if (ymText.isNotBlank()) {
-                        omittedList.add(
-                            OmittedInstallmentEntity(
-                                id = obj.optLong("id", 0L),
-                                purchaseId = obj.optLong("purchaseId", 0L),
-                                yearMonthText = ymText
-                            )
-                        )
-                    }
-                }
-            }
-
-            val paymentsList = mutableListOf<CardPurchasePaymentEntity>()
-            root.optJSONArray("card_purchase_payments")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val ymText = obj.optString("yearMonthText", "")
-                    paymentsList.add(
-                        CardPurchasePaymentEntity(
-                            id = obj.optLong("id", 0L),
-                            purchaseId = obj.optLong("purchaseId", 0L),
-                            amount = obj.optDouble("amount", 0.0),
-                            date = obj.optLong("date", System.currentTimeMillis()),
-                            yearMonthText = ymText
-                        )
-                    )
-                }
-            }
-
-            val ignoredList = mutableListOf<IgnoredExpenseEntity>()
-            root.optJSONArray("ignored_expenses")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val key = obj.optString("itemKey", "")
-                    val ymText = obj.optString("yearMonthText", "")
-                    if (key.isNotBlank() && ymText.isNotBlank()) {
-                        ignoredList.add(
-                            IgnoredExpenseEntity(
-                                id = obj.optLong("id", 0L),
-                                itemKey = key,
-                                yearMonthText = ymText
-                            )
-                        )
-                    }
-                }
-            }
-
-            val paidCardsList = mutableListOf<PaidCreditCardEntity>()
-            root.optJSONArray("paid_credit_cards")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val ymText = obj.optString("yearMonthText", "")
-                    if (ymText.isNotBlank()) {
-                        paidCardsList.add(
-                            PaidCreditCardEntity(
-                                id = obj.optLong("id", 0L),
-                                cardId = obj.optLong("cardId", 0L),
-                                yearMonthText = ymText
-                            )
-                        )
-                    }
-                }
-            }
-
-            val paidExpensesList = mutableListOf<PaidExpenseEntity>()
-            root.optJSONArray("paid_expenses")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val key = obj.optString("itemKey", "")
-                    val ymText = obj.optString("yearMonthText", "")
-                    if (key.isNotBlank() && ymText.isNotBlank()) {
-                        paidExpensesList.add(
-                            PaidExpenseEntity(
-                                id = obj.optLong("id", 0L),
-                                itemKey = key,
-                                yearMonthText = ymText
-                            )
-                        )
-                    }
-                }
-            }
-
-            val settledPurchasesList = mutableListOf<SettledPurchaseEntity>()
-            root.optJSONArray("settled_purchases")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val ymText = obj.optString("yearMonthText", "")
-                    if (ymText.isNotBlank()) {
-                        settledPurchasesList.add(
-                            SettledPurchaseEntity(
-                                id = obj.optLong("id", 0L),
-                                purchaseId = obj.optLong("purchaseId", 0L),
-                                yearMonthText = ymText
-                            )
-                        )
-                    }
-                }
-            }
-
-            val receivedIncomesList = mutableListOf<ReceivedIncomeEntity>()
-            root.optJSONArray("received_incomes")?.let { array ->
-                for (i in 0 until array.length()) {
-                    val obj = array.optJSONObject(i) ?: continue
-                    val ymText = obj.optString("yearMonthText", "")
-                    if (ymText.isNotBlank()) {
-                        receivedIncomesList.add(
-                            ReceivedIncomeEntity(
-                                id = obj.optLong("id", 0L),
-                                incomeId = obj.optLong("incomeId", 0L),
-                                yearMonthText = ymText
-                            )
-                        )
-                    }
-                }
-            }
-
-            // Transactionally clear and restore all
             db.withTransaction {
                 db.incomeDao().clearAllIncomes()
                 db.expenseDao().clearAllExpenses()
@@ -602,25 +408,81 @@ object BackupManager {
                 db.settledPurchaseDao().clearAllSettledPurchases()
                 db.receivedIncomeDao().clearAllReceivedIncomes()
 
-                if (incomesList.isNotEmpty()) db.incomeDao().insertAllIncomes(incomesList)
-                if (expensesList.isNotEmpty()) db.expenseDao().insertAllExpenses(expensesList)
-                if (expensePaymentsList.isNotEmpty()) db.expensePaymentDao().insertAllPayments(expensePaymentsList)
-                if (cardsList.isNotEmpty()) db.creditCardDao().insertAllCreditCards(cardsList)
-                if (purchasesList.isNotEmpty()) db.cardPurchaseDao().insertAllCardPurchases(purchasesList)
-                if (savingsList.isNotEmpty()) db.savingsDao().insertAllSavings(savingsList)
-                if (omittedList.isNotEmpty()) db.omittedInstallmentDao().insertAllOmittedInstallments(omittedList)
-                if (paymentsList.isNotEmpty()) db.cardPurchasePaymentDao().insertAllPayments(paymentsList)
-                if (ignoredList.isNotEmpty()) db.ignoredExpenseDao().insertAllIgnoredExpenses(ignoredList)
-                if (paidCardsList.isNotEmpty()) db.paidCreditCardDao().insertAllPaidCreditCards(paidCardsList)
-                if (paidExpensesList.isNotEmpty()) db.paidExpenseDao().insertAllPaidExpenses(paidExpensesList)
-                if (settledPurchasesList.isNotEmpty()) db.settledPurchaseDao().insertAllSettledPurchases(settledPurchasesList)
-                if (receivedIncomesList.isNotEmpty()) db.receivedIncomeDao().insertAllReceivedIncomes(receivedIncomesList)
+                if (data.incomes.isNotEmpty()) db.incomeDao().insertAllIncomes(data.incomes)
+                if (data.expenses.isNotEmpty()) db.expenseDao().insertAllExpenses(data.expenses)
+                if (data.expensePayments.isNotEmpty()) db.expensePaymentDao().insertAllPayments(data.expensePayments)
+                if (data.cards.isNotEmpty()) db.creditCardDao().insertAllCreditCards(data.cards)
+                if (data.purchases.isNotEmpty()) db.cardPurchaseDao().insertAllCardPurchases(data.purchases)
+                if (data.savings.isNotEmpty()) db.savingsDao().insertAllSavings(data.savings)
+                if (data.omittedInstallments.isNotEmpty()) db.omittedInstallmentDao().insertAllOmittedInstallments(data.omittedInstallments)
+                if (data.purchasePayments.isNotEmpty()) db.cardPurchasePaymentDao().insertAllPayments(data.purchasePayments)
+                if (data.ignoredExpenses.isNotEmpty()) db.ignoredExpenseDao().insertAllIgnoredExpenses(data.ignoredExpenses)
+                if (data.paidCards.isNotEmpty()) db.paidCreditCardDao().insertAllPaidCreditCards(data.paidCards)
+                if (data.paidExpenses.isNotEmpty()) db.paidExpenseDao().insertAllPaidExpenses(data.paidExpenses)
+                if (data.settledPurchases.isNotEmpty()) db.settledPurchaseDao().insertAllSettledPurchases(data.settledPurchases)
+                if (data.receivedIncomes.isNotEmpty()) db.receivedIncomeDao().insertAllReceivedIncomes(data.receivedIncomes)
             }
 
-            val resultMsg = tr("¡Datos restaurados con éxito!\n• ${incomesList.size} ingresos\n• ${expensesList.size} gastos fijos\n• ${cardsList.size} tarjetas de crédito\n• ${purchasesList.size} compras a cuotas\n• ${savingsList.size} ahorros", "Data restored!\n• ${incomesList.size} income items\n• ${expensesList.size} fixed expenses\n• ${cardsList.size} credit cards\n• ${purchasesList.size} installment purchases\n• ${savingsList.size} savings")
+            val resultMsg = buildString {
+                append(tr("¡Datos restaurados con éxito!\n• ${data.incomes.size} ingresos\n• ${data.expenses.size} gastos fijos\n• ${data.cards.size} tarjetas de crédito\n• ${data.purchases.size} compras a cuotas\n• ${data.savings.size} ahorros", "Data restored!\n• ${data.incomes.size} income items\n• ${data.expenses.size} fixed expenses\n• ${data.cards.size} credit cards\n• ${data.purchases.size} installment purchases\n• ${data.savings.size} savings"))
+                if (parsed.discardedTotal > 0) {
+                    val detail = describeCounts(parsed.discarded)
+                    append(tr("\n\n⚠ ${parsed.discardedTotal} registros NO se restauraron porque sus datos no eran válidos en la copia: $detail. Revísalos y vuelve a registrarlos.", "\n\n⚠ ${parsed.discardedTotal} records were NOT restored because their data was invalid in the backup: $detail. Check them and add them again."))
+                }
+                if (parsed.orphanedTotal > 0) {
+                    val detail = describeCounts(parsed.orphaned)
+                    append(tr("\n\nSe omitieron ${parsed.orphanedTotal} registros que dependían de algo que no está en la copia: $detail.", "\n\n${parsed.orphanedTotal} records were skipped because they depended on something that isn't in the backup: $detail."))
+                }
+            }
             Result.success(resultMsg)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
+}
+
+/**
+ * Escribe la copia sin arriesgar la anterior: primero a un archivo temporal, luego lo renombra
+ * y solo al final borra las copias viejas de la carpeta. Si la escritura falla, la copia anterior sigue ahí.
+ */
+internal fun writeBackupFileSafely(backupDir: File, fileName: String, content: String): File {
+    if (!backupDir.isDirectory && !backupDir.mkdirs()) throw java.io.IOException("No se pudo crear la carpeta de copias")
+    val target = File(backupDir, fileName)
+    val temp = File(backupDir, "$fileName.tmp")
+    try {
+        temp.writeText(content)
+        if (temp.length() == 0L && content.isNotEmpty()) throw java.io.IOException("La copia quedó vacía")
+        if (target.exists() && !target.delete()) throw java.io.IOException("No se pudo reemplazar la copia")
+        if (!temp.renameTo(target)) throw java.io.IOException("No se pudo guardar la copia")
+    } catch (e: Exception) {
+        temp.delete()
+        throw e
+    }
+    backupDir.listFiles()?.forEach { if (it != target) it.delete() }
+    return target
+}
+
+/** Tamaño máximo de una copia que se intenta restaurar. Una copia real pesa unos pocos cientos de KB. */
+const val MAX_BACKUP_BYTES = 50L * 1024 * 1024
+
+internal class BackupTooLargeException : java.io.IOException("La copia supera el tamaño máximo")
+
+/**
+ * Lee la copia como texto UTF-8 sin cargar más de [maxBytes] en memoria: si el archivo es más grande
+ * lanza [BackupTooLargeException] en cuanto lo nota, en vez de leerlo entero y quedarse sin memoria.
+ */
+internal fun readBackupText(stream: java.io.InputStream, maxBytes: Long = MAX_BACKUP_BYTES): String {
+    val out = java.io.ByteArrayOutputStream()
+    val buffer = ByteArray(64 * 1024)
+    var total = 0L
+    while (true) {
+        val read = stream.read(buffer)
+        if (read < 0) break
+        total += read
+        if (total > maxBytes) throw BackupTooLargeException()
+        out.write(buffer, 0, read)
+    }
+    return out.toString(Charsets.UTF_8.name())
 }

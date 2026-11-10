@@ -1,5 +1,6 @@
 package com.example.gestiongastos.ui.components
 
+import com.example.gestiongastos.data.repository.yearMonthOf
 import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.i18n.tr
 import com.example.gestiongastos.i18n.appLocale
@@ -18,15 +19,14 @@ import com.example.gestiongastos.data.model.CardMonthSummary
 import com.example.gestiongastos.data.model.InstallmentStatusType
 import com.example.gestiongastos.data.model.DEFAULT_USD_RATE
 import com.example.gestiongastos.data.model.ItemKeys
+import com.example.gestiongastos.data.model.computeMonthTotals
+import com.example.gestiongastos.data.model.incomeInstallmentNumber
 import com.example.gestiongastos.data.model.maintenanceFeeInCop
-import com.example.gestiongastos.data.model.payableThisMonth
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.io.File
 import java.text.SimpleDateFormat
-import java.time.Instant
 import java.time.YearMonth
-import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Date
 import java.util.Locale
@@ -58,18 +58,15 @@ fun exportMonthlyCsvReport(
     val year = selectedYearMonth.year
 
     // Totales con el mismo criterio que el Resumen de la app (sin ítems ignorados)
-    val totalIncome = incomes.sumOf { it.amount }
-    val directExpenses = expenses
-        .filter { ItemKeys.direct(it.id) !in ignoredKeys }
-        .sumOf { if (it.currency == "USD") it.amount * usdRate else it.amount }
-    val cardExpenses = cardSummaries.sumOf { it.payableThisMonth(usdRate, ignoredKeys) }
-    val totalExpenses = directExpenses + cardExpenses
-    val totalSavings = savings
-        .filter { ItemKeys.saving(it.id) !in ignoredKeys }
-        .sumOf { it.amount }
+    val totals = computeMonthTotals(incomes, expenses, savings, cardSummaries, usdRate, ignoredKeys)
+    val totalIncome = totals.totalIncome
+    val directExpenses = totals.directExpenses
+    val cardExpenses = totals.creditCardExpenses
+    val totalExpenses = totals.totalExpenses
+    val totalSavings = totals.totalSavings
     val ignoredSuffix = tr(";(Ignorado - no suma)", ";(Ignored - not counted)")
-    val neededAmount = totalExpenses + totalSavings
-    val freeAmount = totalIncome - neededAmount
+    val neededAmount = totals.neededAmount
+    val freeAmount = totals.freeAmount
 
     val sb = StringBuilder()
     // UTF-8 BOM for Microsoft Excel auto-detection
@@ -103,20 +100,13 @@ fun exportMonthlyCsvReport(
             val dateStr = dateFormat.format(Date(inc.date))
             val typeStr = when {
                 inc.totalInstallments > 1 -> {
-                    val entryDate = try {
-                        Instant.ofEpochMilli(inc.date).atZone(ZoneId.systemDefault()).toLocalDate()
-                    } catch (e: Exception) {
-                        java.time.LocalDate.now()
-                    }
-                    val entryYearMonth = YearMonth.from(entryDate)
-                    val diff = (selectedYearMonth.year - entryYearMonth.year) * 12 + (selectedYearMonth.monthValue - entryYearMonth.monthValue)
-                    val currentInst = (diff + 1).coerceIn(1, inc.totalInstallments)
+                    val currentInst = incomeInstallmentNumber(inc, selectedYearMonth)
                     tr("Cuota $currentInst de ${inc.totalInstallments}", "Installment $currentInst of ${inc.totalInstallments}")
                 }
                 inc.isRecurring -> {
                     if (inc.endDateMillis != null) {
                         val endYm = try {
-                            YearMonth.from(Instant.ofEpochMilli(inc.endDateMillis).atZone(ZoneId.systemDefault()).toLocalDate())
+                            yearMonthOf(inc.endDateMillis)
                         } catch (e: Exception) { null }
                         if (endYm != null) tr("Recurrente (hasta ${endYm.monthValue}/${endYm.year})", "Recurring (until ${endYm.monthValue}/${endYm.year})") else tr("Recurrente", "Recurring")
                     } else {
@@ -217,7 +207,9 @@ fun exportMonthlyCsvReport(
             }
         }
 
-        val cacheFile = File(context.cacheDir, fileName)
+        // Carpeta propia dentro de la caché: es una de las pocas que el FileProvider deja compartir
+        val reportDir = File(context.cacheDir, "reports").apply { mkdirs() }
+        val cacheFile = File(reportDir, fileName)
         cacheFile.writeText(csvContent, Charsets.UTF_8)
 
         val fileUri = FileProvider.getUriForFile(

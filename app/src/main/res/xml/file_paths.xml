@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Solo se comparten estas carpetas de la caché (antes era toda la caché):
+     backups/ para la copia de seguridad, reports/ para el reporte CSV y shared_apk/ para "Compartir APK". -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <cache-path name="cache_files" path="." />
+    <cache-path name="backups" path="backups/" />
+    <cache-path name="reports" path="reports/" />
+    <cache-path name="shared_apk" path="shared_apk/" />
 </paths>

@@ -1,5 +1,6 @@
 package com.example.gestiongastos.ui.viewmodel
 
+import com.example.gestiongastos.data.model.toCents
 import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.data.local.ExpensePaymentEntity
 import com.example.gestiongastos.i18n.I18n
@@ -16,6 +17,7 @@ import com.example.gestiongastos.data.local.IncomeEntity
 import com.example.gestiongastos.data.local.SavingsEntity
 import com.example.gestiongastos.data.model.CardMonthSummary
 import com.example.gestiongastos.data.remote.ExchangeRateService
+import com.example.gestiongastos.data.remote.PLAUSIBLE_USD_RATE
 import com.example.gestiongastos.data.repository.FinanceRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +36,7 @@ import android.net.Uri
 import com.example.gestiongastos.data.backup.BackupManager
 import com.example.gestiongastos.data.model.InstallmentPosition
 import com.example.gestiongastos.data.model.ExpenseSortOrder
-import com.example.gestiongastos.data.model.payableThisMonth
+import com.example.gestiongastos.data.model.computeMonthTotals
 import com.example.gestiongastos.data.model.DEFAULT_USD_RATE
 import com.example.gestiongastos.data.repository.endOfMonthMillis
 import com.example.gestiongastos.data.repository.yearMonthOf
@@ -134,8 +136,16 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     // TRM USD → COP (Banco de la República). Se guarda la última conocida para usarla sin internet.
     private val _usdRate = MutableStateFlow(
         prefs.getFloat("last_usd_rate", DEFAULT_USD_RATE.toFloat()).toDouble()
+            .takeIf { it.isFinite() && it in PLAUSIBLE_USD_RATE } ?: DEFAULT_USD_RATE
     )
     val usdRate: StateFlow<Double> = _usdRate.asStateFlow()
+
+    /**
+     * true cuando el último intento de actualizar la TRM falló y [usdRate] es la última guardada
+     * (o la de fábrica), no la de hoy. El Resumen lo avisa cuando el mes tiene montos en dólares.
+     */
+    private val _isUsdRateOutdated = MutableStateFlow(false)
+    val isUsdRateOutdated: StateFlow<Boolean> = _isUsdRateOutdated.asStateFlow()
 
     val ignoredExpenseKeys: StateFlow<Set<String>>
     val paidCreditCardIds: StateFlow<Set<Long>>
@@ -198,6 +208,20 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
         // Fetch live exchange rate on startup
         refreshUsdRate()
 
+        // Una sola vez: limpia las compras de tarjetas que ya no existen (datos de versiones viejas)
+        if (!prefs.getBoolean("orphaned_card_data_cleaned", false)) {
+            viewModelScope.launch {
+                try {
+                    repository.deleteOrphanedCardData()
+                    prefs.edit().putBoolean("orphaned_card_data_cleaned", true).apply()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Si falla no se marca como hecho y se reintenta en el próximo arranque
+                }
+            }
+        }
+
         // El idioma también entra: los estados de las cuotas ("Cuota 1 de 3") son textos traducidos
         cardSummaries = combine(_selectedYearMonth, _usdRate, _cardOrderIds, _language) { ym, rate, orderIds, _ ->
             Triple(ym, rate, orderIds)
@@ -228,32 +252,16 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             @Suppress("UNCHECKED_CAST")
             val ignoredKeys = args[5] as Set<String>
 
-            val totalInc = incomes.sumOf { it.amount }
-            val directExp = expenses
-                .filter { "direct_${it.id}" !in ignoredKeys }
-                .sumOf { if (it.currency == "USD") it.amount * rate else it.amount }
-
-            val ccExp = cards.sumOf { card -> card.payableThisMonth(rate, ignoredKeys) }
-
-            val totalExp = directExp + ccExp
-            val totalSav = savings
-                .filter { "saving_${it.id}" !in ignoredKeys }
-                .sumOf { it.amount }
-
-            val needed = totalExp + totalSav
-            val free = totalInc - (totalExp + totalSav)
-            val totalOutflow = totalExp + totalSav
-            val pct = if (totalInc > 0) (totalOutflow / totalInc).toFloat() else if (totalOutflow > 0) 1.0f else 0f
-
+            val totals = computeMonthTotals(incomes, expenses, savings, cards, rate, ignoredKeys)
             SummaryUiState(
-                totalIncome = totalInc,
-                directExpenses = directExp,
-                creditCardExpenses = ccExp,
-                totalExpenses = totalExp,
-                totalSavings = totalSav,
-                neededAmount = needed,
-                freeAmount = free,
-                spentPercentage = pct.coerceIn(0f, 2f)
+                totalIncome = totals.totalIncome,
+                directExpenses = totals.directExpenses,
+                creditCardExpenses = totals.creditCardExpenses,
+                totalExpenses = totals.totalExpenses,
+                totalSavings = totals.totalSavings,
+                neededAmount = totals.neededAmount,
+                freeAmount = totals.freeAmount,
+                spentPercentage = totals.spentRatio
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SummaryUiState())
 
@@ -318,8 +326,10 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
 
     private fun refreshUsdRate() {
         viewModelScope.launch {
-            // null = sin conexión: se conserva la última TRM conocida
-            val liveRate = ExchangeRateService.getUsdToCopRate() ?: return@launch
+            // null = sin conexión o respuesta inválida: se conserva la última TRM conocida y se deja constancia
+            val liveRate = ExchangeRateService.getUsdToCopRate()
+            _isUsdRateOutdated.value = liveRate == null
+            if (liveRate == null) return@launch
             _usdRate.value = liveRate
             prefs.edit().putFloat("last_usd_rate", liveRate.toFloat()).apply()
         }
@@ -373,15 +383,15 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             repository.addIncome(
                 IncomeEntity(
                     concept = concept,
-                    amount = amount,
+                    amountCents = toCents(amount),
                     date = dateMillis,
                     isRecurring = isRecurring,
                     linkedExpenseIdsText = linkedExpenseIdsText,
                     linkedCardPurchaseIdsText = linkedCardPurchaseIdsText,
-                    extraAmount = extraAmount,
+                    extraAmountCents = toCents(extraAmount),
                     extraConcept = extraConcept,
                     totalInstallments = totalInstallments,
-                    totalAmount = totalAmount,
+                    totalAmountCents = toCents(totalAmount),
                     endDateMillis = endDateMillis
                 )
             )
@@ -416,7 +426,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             repository.addExpense(
                 ExpenseEntity(
                     concept = concept,
-                    amount = amount,
+                    amountCents = toCents(amount),
                     date = dateMillis,
                     isRecurring = isRecurring && installments == 0,
                     currency = currency,
@@ -432,7 +442,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             repository.addExpensePayment(
                 ExpensePaymentEntity(
                     expenseId = expenseId,
-                    amount = amount,
+                    amountCents = toCents(amount),
                     date = System.currentTimeMillis(),
                     yearMonthText = _selectedYearMonth.value.toString()
                 )
@@ -465,7 +475,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             repository.addSavings(
                 SavingsEntity(
                     concept = concept,
-                    amount = amount,
+                    amountCents = toCents(amount),
                     date = dateMillis,
                     isRecurring = isRecurring
                 )
@@ -513,12 +523,12 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     cutoffDay = cutoffDay,
                     paymentDay = paymentDay,
                     interestRate = interestRate,
-                    maintenanceFee = maintenanceFee,
+                    maintenanceFeeCents = toCents(maintenanceFee),
                     currency = currency,
                     isFeeWaiverEnabled = isFeeWaiverEnabled,
-                    minSpendForFeeWaiver = minSpendForFeeWaiver,
+                    minSpendForFeeWaiverCents = toCents(minSpendForFeeWaiver),
                     isFirstInstallmentInterestFree = isFirstInstallmentInterestFree,
-                    creditLimit = creditLimit,
+                    creditLimitCents = toCents(creditLimit),
                     colorIndex = colorIndex
                 )
             )
@@ -553,7 +563,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                 CardPurchaseEntity(
                     cardId = cardId,
                     concept = concept,
-                    totalAmount = totalAmount,
+                    totalAmountCents = toCents(totalAmount),
                     installments = installments,
                     purchaseDate = purchaseDateMillis,
                     isInterestFree = isInterestFree,
@@ -581,7 +591,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
             repository.addCardPurchasePayment(
                 CardPurchasePaymentEntity(
                     purchaseId = purchaseId,
-                    amount = amount,
+                    amountCents = toCents(amount),
                     date = dateMillis,
                     yearMonthText = yearMonth.toString()
                 )
