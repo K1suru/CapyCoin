@@ -11,6 +11,9 @@ import com.example.gestiongastos.ui.components.longDateFormat
 import com.example.gestiongastos.ui.components.shortDateFormat
 import com.example.gestiongastos.ui.screens.UnifiedExpenseItem
 import com.example.gestiongastos.ui.screens.amountInCop
+import com.example.gestiongastos.ui.screens.expenseAmountInCop
+import com.example.gestiongastos.ui.screens.formatIdsSet
+import com.example.gestiongastos.ui.screens.parseIdsSet
 import com.example.gestiongastos.ui.screens.groupExpenseItems
 import com.example.gestiongastos.ui.screens.parseExpenseInstallments
 import com.example.gestiongastos.ui.theme.CardPalettes
@@ -117,5 +120,24 @@ class PureLogicTest {
         val date = java.util.Date(millis(LocalDate.of(2026, 11, 9)))
         assertEquals("09 de noviembre de 2026", longDateFormat().format(date))
         assertTrue(shortDateFormat().format(date).startsWith("09 nov"))
+    }
+
+    @Test
+    fun linkedIdsOfAReimbursementSurviveTheRoundTrip() {
+        assertEquals(setOf(1L, 2L, 54L), parseIdsSet("1,2,54"))
+        assertEquals(setOf(1L, 2L), parseIdsSet(" 1 , 2 ,,x, 2"))   // espacios, vacíos, basura y repetidos
+        assertEquals(emptySet<Long>(), parseIdsSet(null))
+        assertEquals(emptySet<Long>(), parseIdsSet(""))
+        assertNull(formatIdsSet(emptySet()))                        // sin vínculos no se guarda texto
+        assertEquals("7,3", formatIdsSet(linkedSetOf(7L, 3L)))
+        assertEquals(setOf(7L, 3L), parseIdsSet(formatIdsSet(linkedSetOf(7L, 3L))))
+    }
+
+    @Test
+    fun reimbursedExpenseIsValuedInPesos() {
+        val cop = ExpenseEntity(concept = "Arriendo", amountCents = 1_200_000_00, date = 0)
+        val usd = ExpenseEntity(concept = "Hosting", amountCents = 10_50, date = 0, currency = "USD")
+        assertEquals(1_200_000.0, expenseAmountInCop(cop, 4000.0), 0.0)
+        assertEquals(42_000.0, expenseAmountInCop(usd, 4000.0), 0.0)
     }
 }

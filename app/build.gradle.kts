@@ -27,8 +27,8 @@ android {
         minSdk = 24
         targetSdk = 35
         // versionCode solo puede subir (Android no deja instalar una versión menor encima)
-        versionCode = 11
-        versionName = "1.3.4"
+        versionCode = 12
+        versionName = "1.3.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
