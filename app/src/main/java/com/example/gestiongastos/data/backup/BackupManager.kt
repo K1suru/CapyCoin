@@ -303,6 +303,8 @@ object BackupManager {
                 "Copia guardada correctamente:\n• $incomesCount ingresos\n• $expensesCount gastos fijos\n• $purchasesCount compras con tarjeta",
                 "Backup saved:\n• $incomesCount income items\n• $expensesCount fixed expenses\n• $purchasesCount card purchases"
             ))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -323,6 +325,8 @@ object BackupManager {
                 "El archivo pesa más de ${MAX_BACKUP_BYTES / (1024 * 1024)} MB y no parece una copia de CapyCoin. No se restauró nada.",
                 "The file is larger than ${MAX_BACKUP_BYTES / (1024 * 1024)} MB and doesn't look like a CapyCoin backup. Nothing was restored."
             )))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -284,8 +284,8 @@ class MainActivity : FragmentActivity() {
         val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         val initialModeName = prefs.getString("theme_mode", AppThemeMode.SYSTEM.name) ?: AppThemeMode.SYSTEM.name
         val initialColorName = prefs.getString("color_theme", AppColorTheme.YELLOW.name) ?: AppColorTheme.YELLOW.name
-        val initialMode = try { AppThemeMode.valueOf(initialModeName) } catch (e: Exception) { AppThemeMode.SYSTEM }
-        val initialColor = try { AppColorTheme.valueOf(initialColorName) } catch (e: Exception) { AppColorTheme.YELLOW }
+        val initialMode = try { AppThemeMode.valueOf(initialModeName) } catch (e: IllegalArgumentException) { AppThemeMode.SYSTEM }
+        val initialColor = try { AppColorTheme.valueOf(initialColorName) } catch (e: IllegalArgumentException) { AppColorTheme.YELLOW }
 
         setContent {
             var themeMode by remember { mutableStateOf(initialMode) }

@@ -27,8 +27,8 @@ android {
         minSdk = 24
         targetSdk = 35
         // versionCode solo puede subir (Android no deja instalar una versión menor encima)
-        versionCode = 9
-        versionName = "1.3.2"
+        versionCode = 11
+        versionName = "1.3.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -107,7 +107,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.biometric)
 
     // Room

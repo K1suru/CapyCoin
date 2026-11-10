@@ -50,6 +50,13 @@ fun localDateOf(millis: Long): LocalDate = try {
 
 fun yearMonthOf(millis: Long): YearMonth = YearMonth.from(localDateOf(millis))
 
+/** Lee un mes guardado como texto ("2026-08"). Devuelve null si falta o no es un mes válido. */
+fun yearMonthOrNull(text: String?): YearMonth? = try {
+    text?.trim()?.let { YearMonth.parse(it) }
+} catch (e: java.time.format.DateTimeParseException) {
+    null
+}
+
 /** Un registro único aplica solo en su mes; uno recurrente desde su mes hasta [endDateMillis] (incluido). */
 fun isInMonth(target: YearMonth, start: YearMonth, isRecurring: Boolean, endDateMillis: Long?): Boolean {
     if (!isRecurring) return target == start
@@ -237,7 +244,7 @@ class FinanceRepository(private val db: AppDatabase) {
     fun getExpensesForMonth(targetYearMonth: YearMonth): Flow<Pair<List<ExpenseEntity>, Map<Long, ExpenseInstallmentInfo>>> {
         return combine(expenses, expensePayments) { expensesList, payments ->
             val paymentsByExpense = payments.groupBy({ it.expenseId }) { p ->
-                PurchasePayment(try { YearMonth.parse(p.yearMonthText) } catch (e: Exception) { null }, p.amount)
+                PurchasePayment(yearMonthOrNull(p.yearMonthText), p.amount)
             }
             val infos = mutableMapOf<Long, ExpenseInstallmentInfo>()
             val list = expensesList.mapNotNull { expense ->
@@ -277,16 +284,12 @@ class FinanceRepository(private val db: AppDatabase) {
             // Cada abono conserva su mes para no afectar meses anteriores
             val paymentsMap = payments.groupBy({ it.purchaseId }) { payment ->
                 PurchasePayment(
-                    yearMonth = try { YearMonth.parse(payment.yearMonthText) } catch (e: Exception) { null },
+                    yearMonth = yearMonthOrNull(payment.yearMonthText),
                     amount = payment.amount
                 )
             }
             val settledMap = settled.mapNotNull { s ->
-                try {
-                    s.purchaseId to YearMonth.parse(s.yearMonthText)
-                } catch (e: Exception) {
-                    null
-                }
+                yearMonthOrNull(s.yearMonthText)?.let { s.purchaseId to it }
             }.toMap()
 
             cards.map { card ->

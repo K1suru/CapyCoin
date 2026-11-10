@@ -1,5 +1,6 @@
 package com.example.gestiongastos.ui.viewmodel
 
+import com.example.gestiongastos.data.repository.yearMonthOrNull
 import com.example.gestiongastos.data.model.toCents
 import com.example.gestiongastos.data.model.ExpenseInstallmentInfo
 import com.example.gestiongastos.data.local.ExpensePaymentEntity
@@ -70,22 +71,20 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private val _selectedYearMonth = MutableStateFlow(
-        prefs.getString("selected_year_month", null)?.let {
-            try { YearMonth.parse(it) } catch (e: Exception) { YearMonth.now() }
-        } ?: YearMonth.now()
+        yearMonthOrNull(prefs.getString("selected_year_month", null)) ?: YearMonth.now()
     )
     val selectedYearMonth: StateFlow<YearMonth> = _selectedYearMonth.asStateFlow()
 
     private val _installmentsPosition = MutableStateFlow(
         prefs.getString("installments_position", InstallmentPosition.LAST.name)?.let {
-            try { InstallmentPosition.valueOf(it) } catch (e: Exception) { InstallmentPosition.LAST }
+            try { InstallmentPosition.valueOf(it) } catch (e: IllegalArgumentException) { InstallmentPosition.LAST }
         } ?: InstallmentPosition.LAST
     )
     val installmentsPosition: StateFlow<InstallmentPosition> = _installmentsPosition.asStateFlow()
 
     private val _expenseSortOrder = MutableStateFlow(
         prefs.getString("expense_sort_order", ExpenseSortOrder.NEWEST_FIRST.name)?.let {
-            try { ExpenseSortOrder.valueOf(it) } catch (e: Exception) { ExpenseSortOrder.NEWEST_FIRST }
+            try { ExpenseSortOrder.valueOf(it) } catch (e: IllegalArgumentException) { ExpenseSortOrder.NEWEST_FIRST }
         } ?: ExpenseSortOrder.NEWEST_FIRST
     )
     val expenseSortOrder: StateFlow<ExpenseSortOrder> = _expenseSortOrder.asStateFlow()
@@ -218,6 +217,7 @@ class FinanceViewModel(application: Application) : AndroidViewModel(application)
                     throw e
                 } catch (e: Exception) {
                     // Si falla no se marca como hecho y se reintenta en el próximo arranque
+                    android.util.Log.w("FinanceViewModel", "No se pudo limpiar las compras sin tarjeta", e)
                 }
             }
         }

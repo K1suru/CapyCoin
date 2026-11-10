@@ -1,5 +1,6 @@
 package com.example.gestiongastos.data.backup
 
+import com.example.gestiongastos.data.repository.yearMonthOrNull
 import com.example.gestiongastos.data.model.MAX_AMOUNT_CENTS
 import com.example.gestiongastos.data.model.toCentsOrNull
 import com.example.gestiongastos.data.local.CardPurchaseEntity
@@ -15,7 +16,6 @@ import com.example.gestiongastos.data.local.PaidExpenseEntity
 import com.example.gestiongastos.data.local.ReceivedIncomeEntity
 import com.example.gestiongastos.data.local.SavingsEntity
 import com.example.gestiongastos.data.local.SettledPurchaseEntity
-import java.time.YearMonth
 
 // Validación de una copia de seguridad ANTES de tocar la base de datos.
 // Es lógica pura (mapas y listas, sin Android ni org.json) para poder probarla con tests unitarios.
@@ -141,12 +141,7 @@ private fun backupText(value: Any?): String? = when (value) {
 
 /** Mes "2026-08" válido, o null. */
 internal fun backupYearMonth(value: Any?): String? {
-    val text = (value as? String)?.trim().orEmpty()
-    return try {
-        YearMonth.parse(text).toString()
-    } catch (e: Exception) {
-        null
-    }
+    return yearMonthOrNull(value as? String)?.toString()
 }
 
 /** Señal interna: el registro no se puede restaurar. */

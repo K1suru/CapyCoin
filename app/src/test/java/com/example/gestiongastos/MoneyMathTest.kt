@@ -13,6 +13,7 @@ import com.example.gestiongastos.data.model.safePercent
 import com.example.gestiongastos.data.model.safeRatio
 import com.example.gestiongastos.data.repository.localDateOf
 import com.example.gestiongastos.data.repository.yearMonthOf
+import com.example.gestiongastos.data.repository.yearMonthOrNull
 import com.example.gestiongastos.ui.components.currencySymbolOf
 import com.example.gestiongastos.ui.components.formatUsdWithCop
 import org.junit.Assert.assertEquals
@@ -128,5 +129,15 @@ class MoneyMathTest {
         // Un valor absurdo no tumba la app
         localDateOf(Long.MAX_VALUE)
         localDateOf(Long.MIN_VALUE)
+    }
+
+    @Test
+    fun storedMonthTextIsReadOrIgnored() {
+        assertEquals(java.time.YearMonth.of(2026, 8), yearMonthOrNull("2026-08"))
+        assertEquals(java.time.YearMonth.of(2026, 8), yearMonthOrNull(" 2026-08 "))
+        // Un texto que no es un mes no tumba la app ni se convierte en otro mes
+        listOf(null, "", "2026-13", "agosto", "2026-8", "2026-08-01").forEach {
+            assertEquals("yearMonthOrNull($it)", null, yearMonthOrNull(it))
+        }
     }
 }

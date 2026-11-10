@@ -105,10 +105,8 @@ fun exportMonthlyCsvReport(
                 }
                 inc.isRecurring -> {
                     if (inc.endDateMillis != null) {
-                        val endYm = try {
-                            yearMonthOf(inc.endDateMillis)
-                        } catch (e: Exception) { null }
-                        if (endYm != null) tr("Recurrente (hasta ${endYm.monthValue}/${endYm.year})", "Recurring (until ${endYm.monthValue}/${endYm.year})") else tr("Recurrente", "Recurring")
+                        val endYm = yearMonthOf(inc.endDateMillis)
+                        tr("Recurrente (hasta ${endYm.monthValue}/${endYm.year})", "Recurring (until ${endYm.monthValue}/${endYm.year})")
                     } else {
                         tr("Recurrente", "Recurring")
                     }
@@ -233,6 +231,8 @@ fun exportMonthlyCsvReport(
             Toast.makeText(context, tr("Reporte guardado en Descargas: $fileName", "Report saved to Downloads: $fileName"), Toast.LENGTH_LONG).show()
         }
     } catch (e: Exception) {
+        // No se pudo crear el archivo: se comparte el reporte como texto, y queda constancia del motivo
+        android.util.Log.w("ReportExporter", "No se pudo guardar el CSV", e)
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_SUBJECT, tr("Reporte Mensual CapyCoin - $monthName $year", "CapyCoin monthly report - $monthName $year"))

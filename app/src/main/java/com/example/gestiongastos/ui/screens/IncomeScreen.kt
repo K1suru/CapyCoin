@@ -387,11 +387,7 @@ fun IncomeItemCard(
     val currentInstallment = incomeInstallmentNumber(income, targetYearMonth)
 
     val endYearMonth = if (income.isRecurring && income.endDateMillis != null) {
-        try {
-            yearMonthOf(income.endDateMillis)
-        } catch (e: Exception) {
-            null
-        }
+        yearMonthOf(income.endDateMillis)
     } else null
     val endMonthFormatted = endYearMonth?.let {
         it.month.getDisplayName(TextStyle.SHORT, appLocale()).replaceFirstChar { c -> c.uppercase() } + " " + it.year
@@ -753,13 +749,7 @@ fun AddEditIncomeDialog(
     var hasEndDate by remember { mutableStateOf(incomeToEdit?.endDateMillis != null) }
     var endYearMonth by remember {
         mutableStateOf(
-            incomeToEdit?.endDateMillis?.let {
-                try {
-                    yearMonthOf(it)
-                } catch (e: Exception) {
-                    defaultYearMonth.plusMonths(3)
-                }
-            } ?: defaultYearMonth.plusMonths(3)
+            incomeToEdit?.endDateMillis?.let { yearMonthOf(it) } ?: defaultYearMonth.plusMonths(3)
         )
     }
     var showEndDatePicker by remember { mutableStateOf(false) }
